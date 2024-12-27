@@ -82,6 +82,7 @@ async function updateQuotaUsage(userId: number, tokenCount: number) {
         userId,
         tokenCount,
         callCount: 1,
+        quotaLimit: 100000, // Default monthly limit
         resetAt: new Date(today.getFullYear(), today.getMonth() + 1, 1), // Reset on first of next month
       })
       .onConflictDoUpdate({
@@ -123,18 +124,21 @@ export async function summarizeContent(content: string, level: string = 'high_sc
       try {
         const response = await retryOperation(async () => {
           return await openai.chat.completions.create({
-            model: "gpt-4",
+            model: "gpt-3.5-turbo", // Use cheaper model for summarization
             messages: [
               {
                 role: "system",
-                content: `You are a skilled educator. Create a clear summary of the following content tailored for ${level} level students. First provide a brief overview, then follow with a more detailed explanation. Format your response with a clear separation between the summary and explanation using two newlines.`
+                content: `You are a skilled educator. Create a clear summary of the following content tailored for ${level} level students. 
+                         Limit the summary to 150 words and explanation to 300 words. Format your response with a clear separation between the summary and explanation using two newlines.
+                         Focus only on key concepts and main points.`
               },
               {
                 role: "user",
                 content: chunk
               }
             ],
-            temperature: 0.7
+            temperature: 0.7,
+            max_tokens: 800 // Limit token usage
           });
         });
 
@@ -176,7 +180,8 @@ export async function summarizeContent(content: string, level: string = 'high_sc
 
     Logger.info("Summarization completed", {
       chunksProcessed: chunks.length,
-      totalSummariesGenerated: summaries.length
+      totalSummariesGenerated: summaries.length,
+      totalTokensUsed: totalTokens
     });
 
     return combinedSummary;
