@@ -18,29 +18,7 @@ interface AnalysisResult {
   explanation: string;
 }
 
-async function extractTextFromImage(imagePath: string): Promise<string> {
-  try {
-    Logger.info("Starting OCR text extraction", { imagePath });
-
-    const ocrResult = await performOCR(imagePath);
-
-    if (!ocrResult.text) {
-      throw new Error("No text extracted from image");
-    }
-
-    Logger.info("OCR extraction completed", {
-      confidence: ocrResult.confidence,
-      textLength: ocrResult.text.length
-    });
-
-    return ocrResult.text;
-  } catch (error) {
-    Logger.error("Error extracting text from image:", error as Error);
-    throw new Error("Failed to extract text from image");
-  }
-}
-
-function preprocessOCRText(text: string): string {
+function preprocessText(text: string): string {
   try {
     Logger.info("Starting text preprocessing", { originalLength: text.length });
 
@@ -65,7 +43,7 @@ function preprocessOCRText(text: string): string {
 
     return cleaned;
   } catch (error) {
-    Logger.error("Error preprocessing OCR text:", error as Error);
+    Logger.error("Error preprocessing text:", error as Error);
     throw new Error("Failed to preprocess text");
   }
 }
@@ -76,14 +54,16 @@ function chunkText(text: string, maxChunkSize: number = 3000): string[] {
 
     const chunks: string[] = [];
     let currentChunk = '';
-    const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
 
-    for (const sentence of sentences) {
-      if ((currentChunk + sentence).length <= maxChunkSize) {
-        currentChunk += sentence;
+    // Split by paragraphs first
+    const paragraphs = text.split(/\n\s*\n/);
+
+    for (const paragraph of paragraphs) {
+      if ((currentChunk + '\n' + paragraph).length <= maxChunkSize) {
+        currentChunk += (currentChunk ? '\n\n' : '') + paragraph;
       } else {
         if (currentChunk) chunks.push(currentChunk.trim());
-        currentChunk = sentence;
+        currentChunk = paragraph;
       }
     }
 
@@ -155,14 +135,14 @@ async function manageQuota(userId: number, tokenCount: number) {
 
 async function processChunks(chunks: string[], userId: number, level: string): Promise<AnalysisResult> {
   try {
-    Logger.info("Starting chunks processing", { 
+    Logger.info("Starting chunks processing", {
       chunksCount: chunks.length,
       level,
-      userId 
+      userId
     });
 
-    const summaries = await Promise.all(chunks.map(async (chunk, index) => {
-      const cleanedText = preprocessOCRText(chunk);
+    const summaryPromises = chunks.map(async (chunk, index) => {
+      const cleanedText = preprocessText(chunk);
 
       Logger.info(`Processing chunk ${index + 1}/${chunks.length}`, {
         chunkLength: cleanedText.length,
@@ -174,24 +154,7 @@ async function processChunks(chunks: string[], userId: number, level: string): P
         messages: [
           {
             role: "system",
-            content: `You are an expert academic content analyzer for ${level} students. Your task is to process and analyze the following text, which was extracted from study materials using OCR.
-
-1. First, verify if the text is readable and contains meaningful academic content.
-2. Then, provide your analysis in two clearly marked sections:
-
-SUMMARY:
-- Extract and list the main concepts and key points
-- Use clear, ${level}-appropriate language
-- Format as bullet points starting with •
-- If the text is not meaningful, respond with "No meaningful content found"
-
-EXPLANATION:
-- Provide a detailed explanation of the concepts
-- Connect ideas and show relationships
-- Use examples when helpful
-- If the text is not meaningful, respond with "No meaningful content to explain"
-
-Important: If the text appears to be corrupted or nonsensical, indicate this clearly in your response.`
+            content: `You are an expert academic content analyzer for ${level} students. Process the text and provide a concise analysis in JSON format with two sections: summary (key points as bullet points) and explanation (detailed analysis connecting the concepts). If the text is not meaningful, respond with appropriate error messages.`
           },
           {
             role: "user",
@@ -199,38 +162,33 @@ Important: If the text appears to be corrupted or nonsensical, indicate this cle
           }
         ],
         temperature: 0.3,
+        response_format: { type: "json_object" },
         max_tokens: 1000
       });
 
       await manageQuota(userId, response.usage?.total_tokens || 0);
 
-      const result = response.choices[0].message?.content;
-      if (!result) {
-        throw new Error("Empty response from OpenAI");
-      }
-
-      // Parse the response into summary and explanation sections
-      const sections = result.split(/(?=SUMMARY:|EXPLANATION:)/g);
-      const summary = sections.find(s => s.includes("SUMMARY:"))?.replace("SUMMARY:", "").trim() || 'No meaningful content found';
-      const explanation = sections.find(s => s.includes("EXPLANATION:"))?.replace("EXPLANATION:", "").trim() || 'No meaningful content to explain';
+      const result = JSON.parse(response.choices[0].message?.content || '{"summary": "", "explanation": ""}');
 
       Logger.info(`Chunk ${index + 1} processed successfully`, {
-        summaryLength: summary.length,
-        explanationLength: explanation.length
+        summaryLength: result.summary.length,
+        explanationLength: result.explanation.length
       });
 
-      return { summary, explanation };
-    }));
+      return result;
+    });
+
+    const summaries = await Promise.all(summaryPromises);
 
     // Combine summaries intelligently
     const combinedSummary = summaries
       .map(s => s.summary)
-      .filter(s => s !== 'No meaningful content found')
+      .filter(Boolean)
       .join("\n\n");
 
     const combinedExplanation = summaries
       .map(s => s.explanation)
-      .filter(s => s !== 'No meaningful content to explain')
+      .filter(Boolean)
       .join("\n\n");
 
     Logger.info("Chunks processing completed", {
@@ -239,8 +197,8 @@ Important: If the text appears to be corrupted or nonsensical, indicate this cle
     });
 
     return {
-      summary: combinedSummary || "Could not extract meaningful content from the image. Please ensure the image contains clear, readable text.",
-      explanation: combinedExplanation || "Could not generate an explanation as the content could not be properly extracted. Please check the image quality and text clarity."
+      summary: combinedSummary || "Could not extract meaningful content from the file. Please ensure the content is clear and readable.",
+      explanation: combinedExplanation || "Could not generate an explanation. Please check the file content and try again."
     };
   } catch (error) {
     Logger.error("Error processing chunks:", error as Error);
@@ -249,10 +207,10 @@ Important: If the text appears to be corrupted or nonsensical, indicate this cle
 }
 
 export async function summarizeContent(
-  content: string | Buffer, 
-  level: string = 'high_school', 
-  userId: number, 
-  fileId: number, 
+  content: string | Buffer,
+  level: string = 'high_school',
+  userId: number,
+  fileId: number,
   mimeType?: string
 ): Promise<AnalysisResult> {
   Logger.info("Starting content summarization", { level, mimeType });
@@ -278,7 +236,7 @@ export async function summarizeContent(
       throw new Error("Empty content provided for summarization");
     }
 
-    Logger.info("Content extracted successfully", { 
+    Logger.info("Content extracted successfully", {
       contentLength: textContent.length,
       isImage: typeof content !== 'string'
     });

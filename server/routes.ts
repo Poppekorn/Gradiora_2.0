@@ -36,27 +36,194 @@ const upload = multer({
     fileSize: 50 * 1024 * 1024 // 50MB limit
   },
   fileFilter: (req, file, cb) => {
-    const allowedMimes = [
-      'text/plain',
-      'text/markdown',
-      'application/pdf',
-      'image/jpeg',
-      'image/png',
-      'image/webp',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
-      'application/msword' // .doc
-    ];
+    const allowedMimes = {
+      'text/plain': true,
+      'text/markdown': true,
+      'application/pdf': true,
+      'image/jpeg': true,
+      'image/png': true,
+      'image/webp': true,
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': true,
+      'application/msword': true
+    };
 
-    if (allowedMimes.includes(file.mimetype)) {
+    // Handle common MIME type variations
+    const normalizedMime = file.mimetype.toLowerCase();
+    if (allowedMimes[normalizedMime] || 
+        (normalizedMime.includes('word') || 
+         normalizedMime.includes('doc'))) {
       cb(null, true);
     } else {
-      cb(new Error(`Invalid file type. Allowed types are: ${allowedMimes.join(', ')}`));
+      cb(new Error(`Invalid file type. Allowed types are: ${Object.keys(allowedMimes).join(', ')}`));
     }
   }
 });
 
+// Helper function to extract text from documents
+async function extractTextFromDocument(filePath: string, mimeType: string): Promise<string> {
+  try {
+    Logger.info("Starting text extraction", { filePath, mimeType });
+
+    if (mimeType.startsWith('image/')) {
+      const ocrResult = await performOCR(filePath);
+      Logger.info("OCR completed", {
+        confidence: ocrResult.confidence,
+        textLength: ocrResult.text.length
+      });
+      return ocrResult.text;
+    } 
+    else if (mimeType.includes('word') || mimeType.includes('doc')) {
+      const result = await mammoth.extractRawText({ path: filePath });
+      Logger.info("Word document text extracted", {
+        textLength: result.value.length
+      });
+      return result.value;
+    }
+    else if (mimeType === 'text/plain' || mimeType === 'text/markdown') {
+      const content = await fsPromises.readFile(filePath, 'utf-8');
+      return content;
+    }
+
+    throw new Error("Unsupported file type for text extraction");
+  } catch (error) {
+    Logger.error("Error in text extraction:", error as Error);
+    throw error;
+  }
+}
+
 export function registerRoutes(app: Express): Server {
   setupAuth(app);
+
+  // Add file preview endpoint
+  app.get("/api/boards/:boardId/files/:fileId/preview", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.status(401).send("Not authenticated");
+    }
+
+    try {
+      const [file] = await db
+        .select()
+        .from(files)
+        .where(eq(files.id, parseInt(req.params.fileId)))
+        .limit(1);
+
+      if (!file) {
+        return res.status(404).send("File not found");
+      }
+
+      const filePath = path.join(process.cwd(), 'uploads', file.filename);
+
+      // Generate preview based on file type
+      if (file.mimeType.startsWith('image/')) {
+        // For images, generate a thumbnail
+        const thumbnail = await sharp(filePath)
+          .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
+          .toBuffer();
+
+        res.setHeader('Content-Type', file.mimeType);
+        return res.send(thumbnail);
+      }
+      else if (file.mimeType === 'application/pdf') {
+        // For PDFs, get metadata
+        const pdfBytes = await fsPromises.readFile(filePath);
+        const pdfDoc = await PDFDocument.load(pdfBytes);
+        const pages = pdfDoc.getPages();
+
+        return res.json({
+          type: 'pdf',
+          pageCount: pages.length,
+          metadata: pdfDoc.getTitle()
+        });
+      }
+      else if (file.mimeType.includes('word') || file.mimeType.includes('doc')) {
+        try {
+          // For Word documents, extract text preview
+          const result = await mammoth.extractRawText({ path: filePath });
+          const previewText = result.value.substring(0, 1000) + (result.value.length > 1000 ? '...' : '');
+          return res.json({
+            type: 'document',
+            preview: previewText,
+            metadata: {
+              totalLength: result.value.length
+            }
+          });
+        } catch (docError) {
+          Logger.error("Error extracting Word document text:", docError as Error);
+          return res.status(500).send("Failed to extract document content");
+        }
+      }
+      else if (file.mimeType === 'text/plain' || file.mimeType === 'text/markdown') {
+        // For text files, return first 1000 characters
+        const content = await fsPromises.readFile(filePath, 'utf-8');
+        const previewText = content.substring(0, 1000) + (content.length > 1000 ? '...' : '');
+        return res.json({
+          type: 'text',
+          preview: previewText,
+          metadata: {
+            totalLength: content.length
+          }
+        });
+      }
+
+      res.status(400).send("Preview not available for this file type");
+    } catch (error) {
+      Logger.error("Error generating file preview:", error as Error);
+      res.status(500).send("Failed to generate preview");
+    }
+  });
+
+  // Update file conversion endpoint to handle different file types
+  app.post("/api/boards/:boardId/files/:fileId/convert", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.status(401).send("Not authenticated");
+    }
+
+    try {
+      Logger.info("Starting file conversion", {
+        boardId: req.params.boardId,
+        fileId: req.params.fileId,
+        userId: req.user?.id,
+      });
+
+      const [file] = await db
+        .select()
+        .from(files)
+        .where(eq(files.id, parseInt(req.params.fileId)))
+        .limit(1);
+
+      if (!file) {
+        return res.status(404).send("File not found");
+      }
+
+      const filePath = path.join(process.cwd(), 'uploads', file.filename);
+      const extractedText = await extractTextFromDocument(filePath, file.mimeType);
+
+      // Store the extracted text
+      await db
+        .insert(fileSummaries)
+        .values({
+          fileId: parseInt(req.params.fileId),
+          summary: "Text Extraction Complete",
+          explanation: extractedText,
+          educationLevel: 'raw_text',
+        })
+        .onConflictDoUpdate({
+          target: [fileSummaries.fileId, fileSummaries.educationLevel],
+          set: {
+            explanation: extractedText,
+            updatedAt: new Date(),
+          },
+        });
+
+      res.json({
+        success: true,
+        textLength: extractedText.length
+      });
+    } catch (error) {
+      Logger.error("Error converting file", error as Error);
+      res.status(500).send("Failed to convert file");
+    }
+  });
 
   // Add quota endpoint
   app.get("/api/quota", async (req, res) => {
@@ -304,157 +471,6 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  // Add file preview endpoint
-  app.get("/api/boards/:boardId/files/:fileId/preview", async (req, res) => {
-    if (!req.isAuthenticated()) {
-      return res.status(401).send("Not authenticated");
-    }
-
-    try {
-      const [file] = await db
-        .select()
-        .from(files)
-        .where(eq(files.id, parseInt(req.params.fileId)))
-        .limit(1);
-
-      if (!file) {
-        return res.status(404).send("File not found");
-      }
-
-      const filePath = path.join(process.cwd(), 'uploads', file.filename);
-
-      // Generate preview based on file type
-      if (file.mimeType.startsWith('image/')) {
-        // For images, generate a thumbnail
-        const thumbnail = await sharp(filePath)
-          .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
-          .toBuffer();
-
-        res.setHeader('Content-Type', file.mimeType);
-        return res.send(thumbnail);
-      }
-      else if (file.mimeType === 'application/pdf') {
-        // For PDFs, get first page as image
-        const pdfBytes = await fsPromises.readFile(filePath);
-        const pdfDoc = await PDFDocument.load(pdfBytes);
-        const pages = pdfDoc.getPages();
-        if (pages.length > 0) {
-          // Implementation for PDF preview would go here
-          return res.json({
-            type: 'pdf',
-            pageCount: pages.length,
-            metadata: pdfDoc.getTitle()
-          });
-        }
-      }
-      else if (file.mimeType.includes('wordprocessingml.document') || file.mimeType.includes('msword')) {
-        // For Word documents, extract text preview
-        const result = await mammoth.extractRawText({ path: filePath });
-        const previewText = result.value.substring(0, 1000) + (result.value.length > 1000 ? '...' : '');
-        return res.json({
-          type: 'document',
-          preview: previewText,
-          metadata: {
-            totalLength: result.value.length
-          }
-        });
-      }
-      else if (file.mimeType === 'text/plain' || file.mimeType === 'text/markdown') {
-        // For text files, return first 1000 characters
-        const content = await fsPromises.readFile(filePath, 'utf-8');
-        const previewText = content.substring(0, 1000) + (content.length > 1000 ? '...' : '');
-        return res.json({
-          type: 'text',
-          preview: previewText,
-          metadata: {
-            totalLength: content.length
-          }
-        });
-      }
-
-      res.status(400).send("Preview not available for this file type");
-    } catch (error) {
-      Logger.error("Error generating file preview:", error as Error);
-      res.status(500).send("Failed to generate preview");
-    }
-  });
-
-
-  // Update file conversion endpoint to handle different file types
-  app.post("/api/boards/:boardId/files/:fileId/convert", async (req, res) => {
-    if (!req.isAuthenticated()) {
-      return res.status(401).send("Not authenticated");
-    }
-
-    try {
-      Logger.info("Starting file conversion", {
-        boardId: req.params.boardId,
-        fileId: req.params.fileId,
-        userId: req.user?.id,
-      });
-
-      const [file] = await db
-        .select()
-        .from(files)
-        .where(eq(files.id, parseInt(req.params.fileId)))
-        .limit(1);
-
-      if (!file) {
-        return res.status(404).send("File not found");
-      }
-
-      const filePath = path.join(process.cwd(), 'uploads', file.filename);
-      let extractedText = '';
-
-      // Extract text based on file type
-      if (file.mimeType.startsWith('image/')) {
-        const ocrResult = await performOCR(filePath);
-        extractedText = ocrResult.text;
-        Logger.info("OCR completed", {
-          confidence: ocrResult.confidence,
-          textLength: extractedText.length
-        });
-      }
-      else if (file.mimeType.includes('wordprocessingml.document') || file.mimeType.includes('msword')) {
-        const result = await mammoth.extractRawText({ path: filePath });
-        extractedText = result.value;
-        Logger.info("Word document text extracted", {
-          textLength: extractedText.length
-        });
-      }
-      else if (file.mimeType === 'text/plain' || file.mimeType === 'text/markdown') {
-        extractedText = await fsPromises.readFile(filePath, 'utf-8');
-      }
-      else {
-        return res.status(400).send("File type not supported for conversion");
-      }
-
-      // Store the extracted text
-      await db
-        .insert(fileSummaries)
-        .values({
-          fileId: parseInt(req.params.fileId),
-          summary: "Text Extraction Complete",
-          explanation: extractedText,
-          educationLevel: 'raw_text',
-        })
-        .onConflictDoUpdate({
-          target: [fileSummaries.fileId, fileSummaries.educationLevel],
-          set: {
-            explanation: extractedText,
-            updatedAt: new Date(),
-          },
-        });
-
-      res.json({
-        success: true,
-        textLength: extractedText.length
-      });
-    } catch (error) {
-      Logger.error("Error converting file", error as Error);
-      res.status(500).send("Failed to convert file");
-    }
-  });
 
   // Add a new endpoint to get stored summaries
   app.get("/api/boards/:boardId/files/:fileId/summary", async (req, res) => {
