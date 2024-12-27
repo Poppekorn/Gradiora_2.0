@@ -1021,6 +1021,199 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
+  // Analyze files within a study unit
+  app.post("/api/boards/:boardId/tiles/:tileId/analyze", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      Logger.warn("Unauthorized study unit analysis attempt", {
+        ip: req.ip,
+        headers: req.headers,
+        boardId: req.params.boardId,
+        tileId: req.params.tileId,
+      });
+      return res.status(401).send("Not authenticated");
+    }
+
+    try {
+      // Get the study unit (tile)
+      const [tile] = await db
+        .select()
+        .from(tiles)
+        .where(eq(tiles.id, parseInt(req.params.tileId)))
+        .limit(1);
+
+      if (!tile) {
+        return res.status(404).send("Study unit not found");
+      }
+
+      // Get files associated with this study unit via tags
+      const studyUnitFiles = await db.query.files.findMany({
+        where: (files, { exists, and, eq }) => 
+          exists(
+            db.select()
+              .from(fileTags)
+              .where(
+                and(
+                  eq(fileTags.fileId, files.id),
+                  exists(
+                    db.select()
+                      .from(tags)
+                      .where(
+                        and(
+                          eq(tags.id, fileTags.tagId),
+                          eq(tags.name, tile.title),
+                          eq(tags.isStudyUnitTag, true)
+                        )
+                      )
+                  )
+                )
+              )
+          ),
+      });
+
+      if (studyUnitFiles.length === 0) {
+        return res.status(404).send("No files found in this study unit");
+      }
+
+      // Read all file contents
+      const contents = await Promise.all(
+        studyUnitFiles.map(async (file) => {
+          const filePath = path.join(process.cwd(), 'uploads', file.filename);
+          return readFile(filePath, 'utf-8');
+        })
+      );
+
+      // Get combined analysis
+      const analysis = await analyzeMultipleContents(contents);
+
+      // Update the tile with the analysis results
+      await db
+        .update(tiles)
+        .set({
+          notes: JSON.stringify({
+            ...JSON.parse(tile.notes || '{}'),
+            aiAnalysis: {
+              summary: analysis.summary,
+              explanation: analysis.explanation,
+              analyzedAt: new Date().toISOString(),
+            }
+          })
+        })
+        .where(eq(tiles.id, parseInt(req.params.tileId)));
+
+      Logger.info("Study unit content analyzed successfully", {
+        tileId: req.params.tileId,
+        boardId: req.params.boardId,
+        fileCount: studyUnitFiles.length,
+        userId: req.user?.id,
+      });
+
+      res.json(analysis);
+    } catch (error) {
+      Logger.error("Error analyzing study unit content", error as Error, {
+        userId: req.user?.id,
+        boardId: req.params.boardId,
+        tileId: req.params.tileId,
+      });
+      res.status(500).send("Failed to analyze study unit content");
+    }
+  });
+
+  // Generate quiz for a study unit
+  app.post("/api/boards/:boardId/tiles/:tileId/quiz", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      Logger.warn("Unauthorized study unit quiz generation attempt", {
+        ip: req.ip,
+        headers: req.headers,
+        boardId: req.params.boardId,
+        tileId: req.params.tileId,
+      });
+      return res.status(401).send("Not authenticated");
+    }
+
+    try {
+      // Get the study unit (tile)
+      const [tile] = await db
+        .select()
+        .from(tiles)
+        .where(eq(tiles.id, parseInt(req.params.tileId)))
+        .limit(1);
+
+      if (!tile) {
+        return res.status(404).send("Study unit not found");
+      }
+
+      // Get files associated with this study unit via tags
+      const studyUnitFiles = await db.query.files.findMany({
+        where: (files, { exists, and, eq }) => 
+          exists(
+            db.select()
+              .from(fileTags)
+              .where(
+                and(
+                  eq(fileTags.fileId, files.id),
+                  exists(
+                    db.select()
+                      .from(tags)
+                      .where(
+                        and(
+                          eq(tags.id, fileTags.tagId),
+                          eq(tags.name, tile.title),
+                          eq(tags.isStudyUnitTag, true)
+                        )
+                      )
+                  )
+                )
+              )
+          ),
+      });
+
+      if (studyUnitFiles.length === 0) {
+        return res.status(404).send("No files found in this study unit");
+      }
+
+      // Read all file contents
+      const contents = await Promise.all(
+        studyUnitFiles.map(async (file) => {
+          const filePath = path.join(process.cwd(), 'uploads', file.filename);
+          return readFile(filePath, 'utf-8');
+        })
+      );
+
+      // Generate quiz based on combined content
+      const quiz = await generateQuiz(contents.join('\n\n--- Next Document ---\n\n'));
+
+      // Store the quiz in the tile's notes
+      await db
+        .update(tiles)
+        .set({
+          notes: JSON.stringify({
+            ...JSON.parse(tile.notes || '{}'),
+            aiQuiz: {
+              ...quiz,
+              generatedAt: new Date().toISOString(),
+            }
+          })
+        })
+        .where(eq(tiles.id, parseInt(req.params.tileId)));
+
+      Logger.info("Study unit quiz generated successfully", {
+        tileId: req.params.tileId,
+        boardId: req.params.boardId,
+        fileCount: studyUnitFiles.length,
+        userId: req.user?.id,
+      });
+
+      res.json(quiz);
+    } catch (error) {
+      Logger.error("Error generating study unit quiz", error as Error, {
+        userId: req.user?.id,
+        boardId: req.params.boardId,
+        tileId: req.params.tileId,
+      });
+      res.status(500).send("Failed to generate study unit quiz");
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }
