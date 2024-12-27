@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useFiles } from "@/hooks/use-files";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { File as FileIcon, Tag, Plus, Trash2, X, MoreVertical, BookOpen } from "lucide-react";
+import { File as FileIcon, Tag, Plus, Trash2, X, MoreVertical, BookOpen, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import type { File, Tag as TagType } from "@db/schema";
 import {
@@ -208,6 +208,21 @@ export default function FileList({ boardId }: FileListProps) {
   return (
     <>
       <div className="space-y-4">
+        <div className="flex items-center justify-end mb-4">
+          <Select value={educationLevel} onValueChange={setEducationLevel}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Select education level" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="elementary">Elementary School</SelectItem>
+              <SelectItem value="middle">Middle School</SelectItem>
+              <SelectItem value="high_school">High School</SelectItem>
+              <SelectItem value="college">College</SelectItem>
+              <SelectItem value="graduate">Graduate Level</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {files.map((file: FileWithTags) => (
             <Card
@@ -233,8 +248,15 @@ export default function FileList({ boardId }: FileListProps) {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => handleSummarize(file.id)}>
-                          <BookOpen className="mr-2 h-4 w-4" />
+                        <DropdownMenuItem 
+                          onClick={() => handleSummarize(file.id)}
+                          disabled={summaryMutation.isPending}
+                        >
+                          {summaryMutation.isPending ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <BookOpen className="mr-2 h-4 w-4" />
+                          )}
                           Summarize
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => handleDeleteFile(file.id)} className="text-red-500">
@@ -287,17 +309,26 @@ export default function FileList({ boardId }: FileListProps) {
               Here's a summary of the content
             </DialogDescription>
           </DialogHeader>
-          <ScrollArea className="max-h-[60vh]">
-            {summaryResult && (
+          <ScrollArea className="h-[60vh] py-4">
+            {summaryMutation.isPending ? (
+              <div className="flex items-center justify-center h-full">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                <span className="ml-2 text-muted-foreground">Generating summary...</span>
+              </div>
+            ) : summaryResult ? (
               <div className="space-y-6">
-                <div>
+                <div className="p-4 bg-muted rounded-lg">
                   <h3 className="text-lg font-semibold mb-2">Summary</h3>
-                  <p className="text-muted-foreground">{summaryResult.summary}</p>
+                  <p className="text-muted-foreground whitespace-pre-wrap">{summaryResult.summary}</p>
                 </div>
-                <div>
+                <div className="p-4 bg-muted rounded-lg">
                   <h3 className="text-lg font-semibold mb-2">Detailed Explanation</h3>
                   <p className="text-muted-foreground whitespace-pre-wrap">{summaryResult.explanation}</p>
                 </div>
+              </div>
+            ) : (
+              <div className="text-center text-muted-foreground">
+                No summary available
               </div>
             )}
           </ScrollArea>
