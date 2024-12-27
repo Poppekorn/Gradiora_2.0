@@ -173,8 +173,41 @@ export function registerRoutes(app: Express): Server {
     }
 
     try {
-      // First delete all associated tiles
       const boardId = parseInt(req.params.id);
+
+      // First, delete all file tags
+      await db
+        .delete(fileTags)
+        .where(
+          eq(fileTags.fileId,
+            db
+              .select({ id: files.id })
+              .from(files)
+              .where(eq(files.boardId, boardId))
+              .limit(1)
+          )
+        );
+
+      // Then delete all files
+      const deletedFiles = await db
+        .delete(files)
+        .where(eq(files.boardId, boardId))
+        .returning();
+
+      // Delete physical files
+      for (const file of deletedFiles) {
+        const filePath = path.join(process.cwd(), 'uploads', file.filename);
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      }
+
+      Logger.info("Associated files deleted", {
+        boardId: req.params.id,
+        userId: req.user?.id,
+      });
+
+      // Delete all tiles
       await db
         .delete(tiles)
         .where(eq(tiles.boardId, boardId));
@@ -184,7 +217,7 @@ export function registerRoutes(app: Express): Server {
         userId: req.user?.id,
       });
 
-      // Then delete the board
+      // Finally delete the board
       const [deletedBoard] = await db
         .delete(boards)
         .where(eq(boards.id, boardId))
