@@ -16,6 +16,17 @@ import { Input } from "@/components/ui/input";
 import { Loader2, Upload, Plus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import type { Tag } from "@db/schema";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { findSimilarTags, normalizeTagName } from "@/lib/tag-utils";
 
 interface FileUploadProps {
   boardId: number;
@@ -49,6 +60,8 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedTags, setSelectedTags] = useState<number[]>([]);
   const [newTagName, setNewTagName] = useState("");
+  const [showSuggestionDialog, setShowSuggestionDialog] = useState(false);
+  const [similarTagSuggestions, setSimilarTagSuggestions] = useState<string[]>([]);
 
   const { uploadFile, createTag, tags } = useFiles(boardId);
   const { tiles } = useTiles(boardId);
@@ -102,7 +115,6 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
       setSelectedFile(null);
       setSelectedTags([]);
     } catch (error) {
-      console.error("Failed to upload file:", error);
       toast({
         variant: "destructive",
         title: "Error",
@@ -117,13 +129,14 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
     if (!newTagName.trim()) return;
 
     try {
-      // Check if tag already exists (case-insensitive)
-      const normalizedNewTag = newTagName.trim().toLowerCase();
-      const tagExists = tags?.some(
-        tag => tag.name.toLowerCase() === normalizedNewTag
+      const normalizedNewTag = normalizeTagName(newTagName);
+
+      // Check for exact matches
+      const exactMatchExists = tags?.some(
+        tag => normalizeTagName(tag.name) === normalizedNewTag
       );
 
-      if (tagExists) {
+      if (exactMatchExists) {
         toast({
           variant: "destructive",
           title: "Error",
@@ -132,6 +145,19 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
         return;
       }
 
+      // Find similar tags
+      const similarTags = tags
+        ? findSimilarTags(newTagName, tags.map(t => t.name))
+        : [];
+
+      if (similarTags.length > 0) {
+        // Show suggestion dialog
+        setShowSuggestionDialog(true);
+        setSimilarTagSuggestions(similarTags);
+        return;
+      }
+
+      // If no similar tags found, create the new tag
       await createTag({
         name: newTagName.trim(),
         isStudyUnitTag: false,
@@ -142,7 +168,6 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
         description: "Tag created successfully",
       });
     } catch (error) {
-      console.error("Failed to create tag:", error);
       toast({
         variant: "destructive",
         title: "Error",
@@ -187,86 +212,132 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        {children}
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Upload File</DialogTitle>
-          <DialogDescription>
-            Upload a file and assign it to specific study units or add custom tags.
-            Supported formats: images, documents, and archives up to 50MB.
-          </DialogDescription>
-        </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="file">File *</Label>
-            <Input
-              id="file"
-              type="file"
-              onChange={handleFileChange}
-              accept={ALLOWED_FILE_TYPES.join(',')}
-              required
-            />
-            <p className="text-xs text-muted-foreground">
-              Maximum file size: 50MB
-            </p>
-          </div>
+    <>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogTrigger asChild>
+          {children}
+        </DialogTrigger>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Upload File</DialogTitle>
+            <DialogDescription>
+              Upload a file and assign it to specific study units or add custom tags.
+              Supported formats: images, documents, and archives up to 50MB.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="file">File *</Label>
+              <Input
+                id="file"
+                type="file"
+                onChange={handleFileChange}
+                accept={ALLOWED_FILE_TYPES.join(',')}
+                required
+              />
+              <p className="text-xs text-muted-foreground">
+                Maximum file size: 50MB
+              </p>
+            </div>
 
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label>Tags</Label>
-              <div className="flex items-center gap-2">
-                <Input
-                  placeholder="New tag name"
-                  value={newTagName}
-                  onChange={(e) => setNewTagName(e.target.value)}
-                  className="w-[200px]"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  onClick={handleCreateTag}
-                  disabled={!newTagName.trim()}
-                >
-                  <Plus className="h-4 w-4" />
-                </Button>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>Tags</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    placeholder="New tag name"
+                    value={newTagName}
+                    onChange={(e) => setNewTagName(e.target.value)}
+                    className="w-[200px]"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={handleCreateTag}
+                    disabled={!newTagName.trim()}
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-2 border rounded-lg">
+                {tags?.map((tag: Tag) => (
+                  <Badge
+                    key={tag.id}
+                    variant={selectedTags.includes(tag.id) ? "default" : "outline"}
+                    className="cursor-pointer"
+                    onClick={() => toggleTag(tag.id)}
+                  >
+                    {tag.name}
+                    {tag.isStudyUnitTag && " (Study Unit)"}
+                  </Badge>
+                ))}
               </div>
             </div>
-            <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-2 border rounded-lg">
-              {tags?.map((tag: Tag) => (
-                <Badge
-                  key={tag.id}
-                  variant={selectedTags.includes(tag.id) ? "default" : "outline"}
-                  className="cursor-pointer"
-                  onClick={() => toggleTag(tag.id)}
-                >
-                  {tag.name}
-                  {tag.isStudyUnitTag && " (Study Unit)"}
-                </Badge>
-              ))}
-            </div>
-          </div>
 
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={loading || !selectedFile}>
-              {loading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <>
-                  <Upload className="mr-2 h-4 w-4" />
-                  Upload
-                </>
-              )}
-            </Button>
-          </div>
-        </form>
-      </DialogContent>
-    </Dialog>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={loading || !selectedFile}>
+                {loading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <>
+                    <Upload className="mr-2 h-4 w-4" />
+                    Upload
+                  </>
+                )}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={showSuggestionDialog} onOpenChange={setShowSuggestionDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Similar Tags Found</AlertDialogTitle>
+            <AlertDialogDescription>
+              We found similar existing tags. Would you like to use one of these instead?
+              <div className="mt-4 space-y-2">
+                {similarTagSuggestions.map((tagName) => (
+                  <div
+                    key={tagName}
+                    className="p-2 border rounded hover:bg-accent cursor-pointer"
+                    onClick={() => {
+                      setNewTagName(tagName);
+                      setShowSuggestionDialog(false);
+                    }}
+                  >
+                    {tagName}
+                  </div>
+                ))}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={async () => {
+                setShowSuggestionDialog(false);
+                await createTag({
+                  name: newTagName.trim(),
+                  isStudyUnitTag: false,
+                });
+                setNewTagName("");
+                toast({
+                  title: "Success",
+                  description: "Tag created successfully",
+                });
+              }}
+            >
+              Create New Tag Anyway
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }

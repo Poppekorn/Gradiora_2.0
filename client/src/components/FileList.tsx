@@ -15,6 +15,17 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { findSimilarTags, normalizeTagName } from "@/lib/tag-utils";
 
 interface FileListProps {
   boardId: number;
@@ -35,6 +46,8 @@ interface FileWithTags {
 export default function FileList({ boardId }: FileListProps) {
   const [selectedFile, setSelectedFile] = useState<FileWithTags | null>(null);
   const [newTagName, setNewTagName] = useState("");
+  const [showSuggestionDialog, setShowSuggestionDialog] = useState(false);
+  const [similarTagSuggestions, setSimilarTagSuggestions] = useState<string[]>([]);
   const { files, isLoading, tags, createTag, addTagToFile, removeTagFromFile } = useFiles(boardId);
   const { toast } = useToast();
 
@@ -42,12 +55,14 @@ export default function FileList({ boardId }: FileListProps) {
     if (!newTagName.trim()) return;
 
     try {
-      // Check if tag already exists
-      const tagExists = tags?.some(
-        tag => tag.name.toLowerCase() === newTagName.trim().toLowerCase()
+      const normalizedNewTag = normalizeTagName(newTagName);
+
+      // Check for exact matches
+      const exactMatchExists = tags?.some(
+        tag => normalizeTagName(tag.name) === normalizedNewTag
       );
 
-      if (tagExists) {
+      if (exactMatchExists) {
         toast({
           variant: "destructive",
           title: "Error",
@@ -56,6 +71,19 @@ export default function FileList({ boardId }: FileListProps) {
         return;
       }
 
+      // Find similar tags
+      const similarTags = tags 
+        ? findSimilarTags(newTagName, tags.map(t => t.name))
+        : [];
+
+      if (similarTags.length > 0) {
+        // Show suggestion dialog
+        setShowSuggestionDialog(true);
+        setSimilarTagSuggestions(similarTags);
+        return;
+      }
+
+      // If no similar tags found, create the new tag
       await createTag({
         name: newTagName.trim(),
         isStudyUnitTag: false,
@@ -192,6 +220,51 @@ export default function FileList({ boardId }: FileListProps) {
           </div>
         </DialogContent>
       </Dialog>
+      {showSuggestionDialog && (
+        <AlertDialog open={showSuggestionDialog} onOpenChange={setShowSuggestionDialog}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Similar Tags Found</AlertDialogTitle>
+              <AlertDialogDescription>
+                We found similar existing tags. Would you like to use one of these instead?
+                <div className="mt-4 space-y-2">
+                  {similarTagSuggestions.map((tagName) => (
+                    <div
+                      key={tagName}
+                      className="p-2 border rounded hover:bg-accent cursor-pointer"
+                      onClick={() => {
+                        setNewTagName(tagName);
+                        setShowSuggestionDialog(false);
+                      }}
+                    >
+                      {tagName}
+                    </div>
+                  ))}
+                </div>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={async () => {
+                  setShowSuggestionDialog(false);
+                  await createTag({
+                    name: newTagName.trim(),
+                    isStudyUnitTag: false,
+                  });
+                  setNewTagName("");
+                  toast({
+                    title: "Success",
+                    description: "Tag created successfully",
+                  });
+                }}
+              >
+                Create New Tag Anyway
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </>
   );
 }
