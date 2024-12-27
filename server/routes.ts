@@ -11,14 +11,17 @@ import fs from "fs";
 import { summarizeContent, getQuotaInfo, getStoredSummary } from "./services/openai";
 import { readFile } from "fs/promises";
 import { performOCR } from "./services/ocr"; // Added import statement
+import { promises as fsPromises } from "fs";
+import { PDFDocument } from "pdf-lib";
+import mammoth from "mammoth";
+import sharp from "sharp";
 
-
-// Update the file upload configuration to handle images
+// Update file upload configuration
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     const uploadDir = path.join(process.cwd(), 'uploads');
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
+    if (!fsPromises.existsSync(uploadDir)) {
+      fsPromises.mkdirSync(uploadDir, { recursive: true });
     }
     cb(null, uploadDir);
   },
@@ -34,20 +37,21 @@ const upload = multer({
     fileSize: 50 * 1024 * 1024 // 50MB limit
   },
   fileFilter: (req, file, cb) => {
-    // Accept text files and images
     const allowedMimes = [
       'text/plain',
       'text/markdown',
       'application/pdf',
       'image/jpeg',
       'image/png',
-      'image/webp'
+      'image/webp',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+      'application/msword' // .doc
     ];
 
     if (allowedMimes.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error('Invalid file type. Only text and image files are allowed.'));
+      cb(new Error(`Invalid file type. Allowed types are: ${allowedMimes.join(', ')}`));
     }
   }
 });
@@ -248,7 +252,7 @@ export function registerRoutes(app: Express): Server {
       }
 
       const filePath = path.join(process.cwd(), 'uploads', file.filename);
-      const content = await readFile(filePath);
+      const content = await fsPromises.readFile(filePath);
       const educationLevel = req.body.educationLevel || 'high_school';
 
       Logger.info("Summarizing file content", {
@@ -301,7 +305,83 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  // Add the new convert endpoint after the existing summarize endpoint
+  // Add file preview endpoint
+  app.get("/api/boards/:boardId/files/:fileId/preview", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.status(401).send("Not authenticated");
+    }
+
+    try {
+      const [file] = await db
+        .select()
+        .from(files)
+        .where(eq(files.id, parseInt(req.params.fileId)))
+        .limit(1);
+
+      if (!file) {
+        return res.status(404).send("File not found");
+      }
+
+      const filePath = path.join(process.cwd(), 'uploads', file.filename);
+
+      // Generate preview based on file type
+      if (file.mimeType.startsWith('image/')) {
+        // For images, generate a thumbnail
+        const thumbnail = await sharp(filePath)
+          .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
+          .toBuffer();
+
+        res.setHeader('Content-Type', file.mimeType);
+        return res.send(thumbnail);
+      } 
+      else if (file.mimeType === 'application/pdf') {
+        // For PDFs, get first page as image
+        const pdfBytes = await fsPromises.readFile(filePath);
+        const pdfDoc = await PDFDocument.load(pdfBytes);
+        const pages = pdfDoc.getPages();
+        if (pages.length > 0) {
+          // Implementation for PDF preview would go here
+          return res.json({ 
+            type: 'pdf',
+            pageCount: pages.length,
+            metadata: pdfDoc.getTitle()
+          });
+        }
+      }
+      else if (file.mimeType.includes('wordprocessingml.document') || file.mimeType.includes('msword')) {
+        // For Word documents, extract text preview
+        const result = await mammoth.extractRawText({ path: filePath });
+        const previewText = result.value.substring(0, 1000) + (result.value.length > 1000 ? '...' : '');
+        return res.json({ 
+          type: 'document',
+          preview: previewText,
+          metadata: {
+            totalLength: result.value.length
+          }
+        });
+      }
+      else if (file.mimeType === 'text/plain' || file.mimeType === 'text/markdown') {
+        // For text files, return first 1000 characters
+        const content = await fsPromises.readFile(filePath, 'utf-8');
+        const previewText = content.substring(0, 1000) + (content.length > 1000 ? '...' : '');
+        return res.json({
+          type: 'text',
+          preview: previewText,
+          metadata: {
+            totalLength: content.length
+          }
+        });
+      }
+
+      res.status(400).send("Preview not available for this file type");
+    } catch (error) {
+      Logger.error("Error generating file preview:", error as Error);
+      res.status(500).send("Failed to generate preview");
+    }
+  });
+
+
+  // Update file conversion endpoint to handle different file types
   app.post("/api/boards/:boardId/files/:fileId/convert", async (req, res) => {
     if (!req.isAuthenticated()) {
       return res.status(401).send("Not authenticated");
@@ -321,64 +401,61 @@ export function registerRoutes(app: Express): Server {
         .limit(1);
 
       if (!file) {
-        Logger.warn("File not found for conversion", {
-          fileId: req.params.fileId,
-          boardId: req.params.boardId,
-        });
         return res.status(404).send("File not found");
       }
 
       const filePath = path.join(process.cwd(), 'uploads', file.filename);
-      const content = await readFile(filePath);
+      let extractedText = '';
 
-      Logger.info("Converting file content", {
-        fileId: req.params.fileId,
-        mimeType: file.mimeType,
-      });
+      // Extract text based on file type
+      if (file.mimeType.startsWith('image/')) {
+        const ocrResult = await performOCR(filePath);
+        extractedText = ocrResult.text;
+        Logger.info("OCR completed", {
+          confidence: ocrResult.confidence,
+          textLength: extractedText.length
+        });
+      } 
+      else if (file.mimeType.includes('wordprocessingml.document') || file.mimeType.includes('msword')) {
+        const result = await mammoth.extractRawText({ path: filePath });
+        extractedText = result.value;
+        Logger.info("Word document text extracted", {
+          textLength: extractedText.length
+        });
+      }
+      else if (file.mimeType === 'text/plain' || file.mimeType === 'text/markdown') {
+        extractedText = await fsPromises.readFile(filePath, 'utf-8');
+      }
+      else {
+        return res.status(400).send("File type not supported for conversion");
+      }
 
-      const ocrResult = await performOCR(filePath);
-
-      // Store the OCR result temporarily
+      // Store the extracted text
       await db
         .insert(fileSummaries)
         .values({
           fileId: parseInt(req.params.fileId),
-          summary: "OCR Conversion Complete",
-          explanation: ocrResult.text,
+          summary: "Text Extraction Complete",
+          explanation: extractedText,
           educationLevel: 'raw_text',
         })
         .onConflictDoUpdate({
           target: [fileSummaries.fileId, fileSummaries.educationLevel],
           set: {
-            explanation: ocrResult.text,
+            explanation: extractedText,
             updatedAt: new Date(),
           },
         });
 
-      Logger.info("File conversion completed", {
-        fileId: req.params.fileId,
-        boardId: req.params.boardId,
-        userId: req.user?.id,
-        confidence: ocrResult.confidence,
-      });
-
       res.json({
         success: true,
-        confidence: ocrResult.confidence,
-        textLength: ocrResult.text.length
+        textLength: extractedText.length
       });
     } catch (error) {
-      Logger.error("Error converting file", error as Error, {
-        userId: req.user?.id,
-        boardId: req.params.boardId,
-        fileId: req.params.fileId,
-        errorMessage: (error as Error).message,
-      });
-
+      Logger.error("Error converting file", error as Error);
       res.status(500).send("Failed to convert file");
     }
   });
-
 
   // Add a new endpoint to get stored summaries
   app.get("/api/boards/:boardId/files/:fileId/summary", async (req, res) => {
@@ -561,8 +638,8 @@ export function registerRoutes(app: Express): Server {
       // Delete physical files
       for (const file of deletedFiles) {
         const filePath = path.join(process.cwd(), 'uploads', file.filename);
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
+        if (fsPromises.existsSync(filePath)) {
+          fsPromises.unlinkSync(filePath);
         }
       }
 
@@ -882,10 +959,8 @@ export function registerRoutes(app: Express): Server {
         userId: req.user?.id,
         boardId: req.params.boardId,
       });
-      res.status(500).send("Failed to optimize schedule");
-    }
+      res.status(500).send("Failed to optimize schedule");    }
   });
-
 
   // Delete file endpoint
   app.delete("/api/boards/:boardId/files/:fileId", async (req, res) => {
@@ -937,8 +1012,8 @@ export function registerRoutes(app: Express): Server {
 
       // Delete the actual file from the filesystem
       const filePath = path.join(process.cwd(), 'uploads', deletedFile.filename);
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
+      if (fsPromises.existsSync(filePath)) {
+        fsPromises.unlinkSync(filePath);
       }
 
       Logger.info("File deleted successfully", {
@@ -982,7 +1057,7 @@ export function registerRoutes(app: Express): Server {
       const existingAssociation = await db.query.fileTags.findFirst({
         where: (fileTags, { and, eq }) => and(
           eq(fileTags.fileId, parseInt(req.params.fileId)),
-          eq(fileTags.tagId, parseInt(req.paramstagId))
+          eq(fileTags.tagId, parseInt(req.params.tagId))
         ),
       });
 
@@ -1168,7 +1243,7 @@ export function registerRoutes(app: Express): Server {
       const contents = await Promise.all(
         studyUnitFiles.map(async (file) => {
           const filePath = path.join(process.cwd(), 'uploads', file.filename);
-          return readFile(filePath, 'utf-8');
+          return fsPromises.readFile(filePath, 'utf-8');
         })
       );
 
@@ -1269,7 +1344,7 @@ export function registerRoutes(app: Express): Server {
       const contents = await Promise.all(
         studyUnitFiles.map(async (file) => {
           const filePath = path.join(process.cwd(), 'uploads', file.filename);
-          return readFile(filePath, 'utf-8');
+          return fsPromises.readFile(filePath, 'utf-8');
         })
       );
 

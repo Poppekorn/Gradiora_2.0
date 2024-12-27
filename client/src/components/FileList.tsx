@@ -30,6 +30,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Image } from "@/components/ui/image";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface FileListProps {
   boardId: number;
@@ -54,6 +56,8 @@ export default function FileList({ boardId }: FileListProps) {
   const [summaryLoading, setSummaryLoading] = useState<Record<number, boolean>>({});
   const [conversionLoading, setConversionLoading] = useState<Record<number, boolean>>({});
   const [conversionProgress, setConversionProgress] = useState<Record<number, number>>({});
+  const [filePreview, setFilePreview] = useState<Record<number, any>>({});
+  const [previewLoading, setPreviewLoading] = useState<Record<number, boolean>>({});
 
   const getSummary = useMutation({
     mutationFn: async (fileId: number) => {
@@ -95,6 +99,43 @@ export default function FileList({ boardId }: FileListProps) {
     },
   });
 
+  const fetchFilePreview = async (fileId: number) => {
+    try {
+      setPreviewLoading(prev => ({ ...prev, [fileId]: true }));
+      const response = await fetch(`/api/boards/${boardId}/files/${fileId}/preview`, {
+        credentials: 'include'
+      });
+
+      if (!response.ok) throw new Error(await response.text());
+
+      const contentType = response.headers.get('content-type');
+      if (contentType?.startsWith('image/')) {
+        // For images, create a blob URL
+        const blob = await response.blob();
+        setFilePreview(prev => ({ 
+          ...prev, 
+          [fileId]: { 
+            type: 'image',
+            url: URL.createObjectURL(blob)
+          }
+        }));
+      } else {
+        // For other file types, get the JSON preview
+        const preview = await response.json();
+        setFilePreview(prev => ({ ...prev, [fileId]: preview }));
+      }
+    } catch (error) {
+      console.error("Error fetching preview:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to load file preview",
+      });
+    } finally {
+      setPreviewLoading(prev => ({ ...prev, [fileId]: false }));
+    }
+  };
+
   const handleViewSummary = async (fileId: number) => {
     try {
       setSummaryLoading(prev => ({ ...prev, [fileId]: true }));
@@ -103,29 +144,18 @@ export default function FileList({ boardId }: FileListProps) {
     } catch (error) {
       if ((error as Error).message.includes('not found')) {
         try {
+          // First convert the file
+          setConversionProgress(prev => ({ ...prev, [fileId]: 0 }));
+          await handleQuickConversion(fileId);
+
+          // Then generate summary
           await generateSummary.mutateAsync(fileId);
           setExpandedFileId(fileId);
         } catch (genError) {
-          if ((genError as Error).message?.includes('quota exceeded')) {
-            toast({
-              variant: "destructive",
-              title: "API Quota Exceeded",
-              description: "The AI service is temporarily unavailable. Please try again later.",
-            });
-          } else {
-            toast({
-              variant: "destructive",
-              title: "Error",
-              description: "Failed to generate summary. Please try again.",
-            });
-          }
+          handleError(genError as Error);
         }
       } else {
-        toast({
-          variant: "destructive",
-          title: "Error",
-          description: "Failed to fetch summary. Please try again.",
-        });
+        handleError(error as Error);
       }
     } finally {
       setSummaryLoading(prev => ({ ...prev, [fileId]: false }));
@@ -137,28 +167,38 @@ export default function FileList({ boardId }: FileListProps) {
       setConversionLoading(prev => ({ ...prev, [fileId]: true }));
       setConversionProgress(prev => ({ ...prev, [fileId]: 0 }));
 
-      await generateSummary.mutateAsync(fileId);
+      // First step: Convert file to text
+      const response = await fetch(`/api/boards/${boardId}/files/${fileId}/convert`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+
+      if (!response.ok) throw new Error(await response.text());
+      setConversionProgress(prev => ({ ...prev, [fileId]: 50 }));
+
+      // Second step: Generate summary
+      const summaryResponse = await fetch(`/api/boards/${boardId}/files/${fileId}/summarize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ educationLevel }),
+        credentials: 'include',
+      });
+
+      if (!summaryResponse.ok) throw new Error(await summaryResponse.text());
+      setConversionProgress(prev => ({ ...prev, [fileId]: 100 }));
+
+      const result = await summaryResponse.json();
       setExpandedFileId(fileId);
 
       toast({
         title: "Success",
-        description: "Image converted and summarized successfully!",
+        description: "File processed successfully!",
       });
+
+      return result;
     } catch (error) {
-      setConversionProgress(prev => ({ ...prev, [fileId]: 0 }));
-      if ((error as Error).message?.includes('quota exceeded')) {
-        toast({
-          variant: "destructive",
-          title: "API Quota Exceeded",
-          description: "The AI service is temporarily unavailable. Please try again later.",
-        });
-      } else {
-        toast({
-          variant: "destructive",
-          title: "Error",
-          description: "Failed to convert image. Please try again.",
-        });
-      }
+      handleError(error as Error);
+      throw error;
     } finally {
       setConversionLoading(prev => ({ ...prev, [fileId]: false }));
     }
@@ -182,6 +222,26 @@ export default function FileList({ boardId }: FileListProps) {
     }
   };
 
+  const handleError = (error: Error) => {
+    if (error.message?.includes('quota exceeded')) {
+      toast({
+        variant: "destructive",
+        title: "API Quota Exceeded",
+        description: "The AI service is temporarily unavailable. Please try again later.",
+      });
+    } else {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "An error occurred. Please try again.",
+      });
+    }
+  };
+
+  const isImageFile = (mimeType: string) => {
+    return mimeType.startsWith('image/');
+  };
+
   if (isLoading) {
     return <div>Loading files...</div>;
   }
@@ -198,10 +258,6 @@ export default function FileList({ boardId }: FileListProps) {
       </div>
     );
   }
-
-  const isImageFile = (mimeType: string) => {
-    return mimeType.startsWith('image/');
-  };
 
   return (
     <div className="space-y-4">
@@ -227,12 +283,11 @@ export default function FileList({ boardId }: FileListProps) {
           const isConverting = conversionLoading[file.id];
           const isImage = isImageFile(file.mimeType);
           const progress = conversionProgress[file.id] || 0;
+          const preview = filePreview[file.id];
+          const isPreviewLoading = previewLoading[file.id];
 
           return (
-            <Card
-              key={file.id}
-              className="hover:shadow-lg transition-shadow"
-            >
+            <Card key={file.id} className="hover:shadow-lg transition-shadow">
               <CardHeader className="cursor-pointer">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -335,6 +390,45 @@ export default function FileList({ boardId }: FileListProps) {
                       ))}
                     </div>
                   </div>
+
+                  {!preview && !isPreviewLoading && (
+                    <Button 
+                      variant="ghost" 
+                      onClick={() => fetchFilePreview(file.id)}
+                      className="w-full"
+                    >
+                      Load Preview
+                    </Button>
+                  )}
+
+                  {isPreviewLoading && (
+                    <Skeleton className="w-full h-48" />
+                  )}
+
+                  {preview && (
+                    <div className="border rounded-lg p-4">
+                      {preview.type === 'image' ? (
+                        <Image
+                          src={preview.url}
+                          alt={file.originalName}
+                          className="max-h-48 mx-auto object-contain"
+                        />
+                      ) : preview.type === 'text' || preview.type === 'document' ? (
+                        <div className="max-h-48 overflow-auto">
+                          <pre className="whitespace-pre-wrap text-sm">
+                            {preview.preview}
+                          </pre>
+                        </div>
+                      ) : preview.type === 'pdf' && (
+                        <div className="text-center">
+                          <p>PDF Document</p>
+                          <p className="text-sm text-muted-foreground">
+                            {preview.pageCount} pages
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {isExpanded && (
                     <div className="mt-4 space-y-4 bg-muted p-4 rounded-lg">
