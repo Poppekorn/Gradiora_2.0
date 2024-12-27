@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { setupAuth } from "./auth";
 import { db } from "@db";
 import { boards, tiles, files, tags, fileTags } from "@db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import Logger from "./utils/logger";
 import multer from "multer";
 import path from "path";
@@ -35,6 +35,209 @@ const upload = multer({
 
 export function registerRoutes(app: Express): Server {
   setupAuth(app);
+
+  // Tag management routes
+  app.post("/api/boards/:boardId/tags", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      Logger.warn("Unauthorized tag creation attempt", {
+        ip: req.ip,
+        headers: req.headers,
+        boardId: req.params.boardId,
+      });
+      return res.status(401).send("Not authenticated");
+    }
+
+    try {
+      const normalizedName = req.body.name.trim();
+      Logger.info("Attempting to create/find tag", {
+        boardId: req.params.boardId,
+        normalizedName,
+        userId: req.user?.id,
+      });
+
+      // Check for existing tag with normalized name comparison
+      const [existingTag] = await db
+        .select()
+        .from(tags)
+        .where(
+          and(
+            sql`lower(trim(${tags.name})) = lower(${normalizedName})`,
+            eq(tags.boardId, parseInt(req.params.boardId))
+          )
+        )
+        .limit(1);
+
+      if (existingTag) {
+        Logger.info("Returning existing tag", {
+          tagId: existingTag.id,
+          boardId: req.params.boardId,
+          userId: req.user?.id,
+        });
+        return res.json(existingTag);
+      }
+
+      const [tag] = await db
+        .insert(tags)
+        .values({
+          name: normalizedName,
+          boardId: parseInt(req.params.boardId),
+          isStudyUnitTag: req.body.isStudyUnitTag || false,
+        })
+        .returning();
+
+      Logger.info("Tag created successfully", {
+        tagId: tag.id,
+        boardId: req.params.boardId,
+        userId: req.user?.id,
+      });
+      res.json(tag);
+    } catch (error) {
+      Logger.error("Error creating tag", error as Error, {
+        userId: req.user?.id,
+        boardId: req.params.boardId,
+        payload: req.body,
+      });
+
+      if ((error as any)?.code === '23505') {
+        return res.status(409).send("A tag with this name already exists");
+      }
+
+      res.status(500).send("Failed to create tag");
+    }
+  });
+
+  // File management routes
+  app.post("/api/boards/:boardId/files", upload.single('file'), async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.status(401).send("Not authenticated");
+    }
+
+    try {
+      if (!req.file) {
+        return res.status(400).send("No file uploaded");
+      }
+
+      const selectedTags = JSON.parse(req.body.tags || '[]');
+
+      const [fileRecord] = await db
+        .insert(files)
+        .values({
+          filename: req.file.filename,
+          originalName: req.file.originalname,
+          mimeType: req.file.mimetype,
+          size: req.file.size,
+          boardId: parseInt(req.params.boardId),
+          uploadedBy: req.user!.id,
+        })
+        .returning();
+
+      for (const tagId of selectedTags) {
+        await db
+          .insert(fileTags)
+          .values({
+            fileId: fileRecord.id,
+            tagId: tagId,
+          });
+      }
+
+      res.json(fileRecord);
+    } catch (error) {
+      Logger.error("Error uploading file", error as Error);
+      res.status(500).send("Failed to upload file");
+    }
+  });
+
+  app.get("/api/boards/:boardId/files", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.status(401).send("Not authenticated");
+    }
+
+    try {
+      const boardFiles = await db.query.files.findMany({
+        where: eq(files.boardId, parseInt(req.params.boardId)),
+        with: {
+          tags: {
+            with: {
+              tag: true,
+            },
+          },
+        },
+      });
+
+      res.json(boardFiles);
+    } catch (error) {
+      Logger.error("Error fetching files", error as Error);
+      res.status(500).send("Failed to fetch files");
+    }
+  });
+
+  // Summarize endpoint
+  app.post("/api/boards/:boardId/files/:fileId/summarize", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.status(401).send("Not authenticated");
+    }
+
+    try {
+      Logger.info("Starting file summarization", {
+        boardId: req.params.boardId,
+        fileId: req.params.fileId,
+        userId: req.user?.id,
+      });
+
+      const [file] = await db
+        .select()
+        .from(files)
+        .where(eq(files.id, parseInt(req.params.fileId)))
+        .limit(1);
+
+      if (!file) {
+        Logger.warn("File not found for summarization", {
+          fileId: req.params.fileId,
+          boardId: req.params.boardId,
+        });
+        return res.status(404).send("File not found");
+      }
+
+      const filePath = path.join(process.cwd(), 'uploads', file.filename);
+      const content = await readFile(filePath, 'utf-8');
+
+      const educationLevel = req.body.educationLevel || 'high_school';
+
+      Logger.info("Summarizing file content", {
+        fileId: req.params.fileId,
+        contentLength: content.length,
+        educationLevel,
+      });
+
+      const summary = await summarizeContent(content, educationLevel);
+
+      Logger.info("File summarized successfully", {
+        fileId: req.params.fileId,
+        boardId: req.params.boardId,
+        userId: req.user?.id,
+        educationLevel,
+      });
+
+      res.json(summary);
+    } catch (error) {
+      Logger.error("Error summarizing file", error as Error, {
+        userId: req.user?.id,
+        boardId: req.params.boardId,
+        fileId: req.params.fileId,
+        errorMessage: (error as Error).message,
+      });
+
+      if ((error as Error).message.includes('Request too large')) {
+        return res.status(413).send("File is too large to summarize. Try breaking it into smaller sections.");
+      }
+
+      if ((error as Error).message.includes('Empty content')) {
+        return res.status(400).send("Cannot summarize empty file content");
+      }
+
+      res.status(500).send("Failed to summarize file");
+    }
+  });
 
   // Boards API
   app.get("/api/boards", async (req, res) => {
@@ -651,73 +854,6 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  // Tag management routes (updated)
-  app.post("/api/boards/:boardId/tags", async (req, res) => {
-    if (!req.isAuthenticated()) {
-      Logger.warn("Unauthorized tag creation attempt", {
-        ip: req.ip,
-        headers: req.headers,
-        boardId: req.params.boardId,
-      });
-      return res.status(401).send("Not authenticated");
-    }
-
-    try {
-      const normalizedName = req.body.name.trim();
-      Logger.info("Attempting to create/find tag", {
-        boardId: req.params.boardId,
-        normalizedName,
-        userId: req.user?.id,
-      });
-
-      // Check for existing tag with normalized name comparison
-      const [existingTag] = await db
-        .select()
-        .from(tags)
-        .where(
-          sql`lower(trim(${tags.name})) = lower(${normalizedName}) AND ${tags.boardId} = ${parseInt(req.params.boardId)}`
-        )
-        .limit(1);
-
-      if (existingTag) {
-        Logger.info("Returning existing tag", {
-          tagId: existingTag.id,
-          boardId: req.params.boardId,
-          userId: req.user?.id,
-        });
-        return res.json(existingTag);
-      }
-
-      const [tag] = await db
-        .insert(tags)
-        .values({
-          name: normalizedName,
-          boardId: parseInt(req.params.boardId),
-          isStudyUnitTag: req.body.isStudyUnitTag || false,
-        })
-        .returning();
-
-      Logger.info("Tag created successfully", {
-        tagId: tag.id,
-        boardId: req.params.boardId,
-        userId: req.user?.id,
-      });
-      res.json(tag);
-    } catch (error) {
-      Logger.error("Error creating tag", error as Error, {
-        userId: req.user?.id,
-        boardId: req.params.boardId,
-        payload: req.body,
-      });
-
-      // Check if the error is a unique constraint violation
-      if ((error as any)?.code === '23505') {
-        return res.status(409).send("A tag with this name already exists");
-      }
-
-      res.status(500).send("Failed to create tag");
-    }
-  });
 
   // Add tag to file endpoint
   app.post("/api/boards/:boardId/files/:fileId/tags/:tagId", async (req, res) => {
@@ -837,8 +973,7 @@ export function registerRoutes(app: Express): Server {
         fileId: req.params.fileId,
         tagId: req.params.tagId,
       });
-      res.status(500).send("Failed to remove tag from file");
-    }
+      res.status(500).send("Failed to remove tag from file");    }
   });
 
   app.get("/api/boards/:boardId/tags", async (req, res) => {
@@ -871,16 +1006,9 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-
   // Summarize endpoint
   app.post("/api/boards/:boardId/files/:fileId/summarize", async (req, res) => {
     if (!req.isAuthenticated()) {
-      Logger.warn("Unauthorized file summarization attempt", {
-        ip: req.ip,
-        headers: req.headers,
-        boardId: req.params.boardId,
-        fileId: req.params.fileId,
-      });
       return res.status(401).send("Not authenticated");
     }
 
@@ -891,7 +1019,6 @@ export function registerRoutes(app: Express): Server {
         userId: req.user?.id,
       });
 
-      // Get file record
       const [file] = await db
         .select()
         .from(files)
@@ -906,7 +1033,6 @@ export function registerRoutes(app: Express): Server {
         return res.status(404).send("File not found");
       }
 
-      // Read file content
       const filePath = path.join(process.cwd(), 'uploads', file.filename);
       const content = await readFile(filePath, 'utf-8');
 
@@ -918,7 +1044,6 @@ export function registerRoutes(app: Express): Server {
         educationLevel,
       });
 
-      // Get summary
       const summary = await summarizeContent(content, educationLevel);
 
       Logger.info("File summarized successfully", {
@@ -1147,84 +1272,6 @@ export function registerRoutes(app: Express): Server {
         tileId: req.params.tileId,
       });
       res.status(500).send("Failed to generate study unit quiz");
-    }
-  });
-
-  //New Summarize endpoint
-  app.post("/api/boards/:boardId/files/:fileId/summarize", async (req, res) => {
-    if (!req.isAuthenticated()) {
-      Logger.warn("Unauthorized file summarization attempt", {
-        ip: req.ip,
-        headers: req.headers,
-        boardId: req.params.boardId,
-        fileId: req.params.fileId,
-      });
-      return res.status(401).send("Not authenticated");
-    }
-
-    try {
-      Logger.info("Starting file summarization", {
-        boardId: req.params.boardId,
-        fileId: req.params.fileId,
-        userId: req.user?.id,
-      });
-
-      // Get file record
-      const [file] = await db
-        .select()
-        .from(files)
-        .where(eq(files.id, parseInt(req.params.fileId)))
-        .limit(1);
-
-      if (!file) {
-        Logger.warn("File not found for summarization", {
-          fileId: req.params.fileId,
-          boardId: req.params.boardId,
-        });
-        return res.status(404).send("File not found");
-      }
-
-      // Read file content
-      const filePath = path.join(process.cwd(), 'uploads', file.filename);
-      const content = await readFile(filePath, 'utf-8');
-
-      const educationLevel = req.body.educationLevel || 'high_school';
-
-      Logger.info("Summarizing file content", {
-        fileId: req.params.fileId,
-        contentLength: content.length,
-        educationLevel,
-      });
-
-      // Get summary
-      const summary = await summarizeContent(content, educationLevel);
-
-      Logger.info("File summarized successfully", {
-        fileId: req.params.fileId,
-        boardId: req.params.boardId,
-        userId: req.user?.id,
-        educationLevel,
-      });
-
-      res.json(summary);
-    } catch (error) {
-      Logger.error("Error summarizing file", error as Error, {
-        userId: req.user?.id,
-        boardId: req.params.boardId,
-        fileId: req.params.fileId,
-        errorMessage: (error as Error).message,
-      });
-
-      // Check if error is due to token limit or empty content
-      if ((error as Error).message.includes('Request too large')) {
-        return res.status(413).send("File is too large to summarize. Try breaking it into smaller sections.");
-      }
-
-      if ((error as Error).message.includes('Empty content')) {
-        return res.status(400).send("Cannot summarize empty file content");
-      }
-
-      res.status(500).send("Failed to summarize file");
     }
   });
 

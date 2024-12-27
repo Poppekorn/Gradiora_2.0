@@ -33,6 +33,27 @@ function chunkText(text: string, maxChunkSize: number = 4000): string[] {
   return chunks;
 }
 
+async function retryOperation<T>(
+  operation: () => Promise<T>,
+  retries = 3,
+  delay = 1000
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (retries === 0 || !(error instanceof Error)) throw error;
+
+    if (error.message.includes('Rate limit reached')) {
+      // Wait longer for rate limit errors
+      await new Promise(resolve => setTimeout(resolve, delay * 2));
+    } else {
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+
+    return retryOperation(operation, retries - 1, delay * 2);
+  }
+}
+
 export async function summarizeContent(content: string, level: string = 'high_school'): Promise<AnalysisResult> {
   try {
     Logger.info("Summarizing content with OpenAI", { level, contentLength: content.length });
@@ -46,21 +67,24 @@ export async function summarizeContent(content: string, level: string = 'high_sc
 
     let summaries: AnalysisResult[] = [];
 
+    // Process chunks with retry logic
     for (const chunk of chunks) {
       try {
-        const response = await openai.chat.completions.create({
-          model: "gpt-4",
-          messages: [
-            {
-              role: "system",
-              content: `You are a skilled educator. Create a clear summary of the following content tailored for ${level} level students. Return a concise summary and a more detailed explanation.`
-            },
-            {
-              role: "user",
-              content: chunk
-            }
-          ],
-          temperature: 0.7
+        const response = await retryOperation(async () => {
+          return await openai.chat.completions.create({
+            model: "gpt-4",
+            messages: [
+              {
+                role: "system",
+                content: `You are a skilled educator. Create a clear summary of the following content tailored for ${level} level students. First provide a brief overview, then follow with a more detailed explanation. Format your response with a clear separation between the summary and explanation using two newlines.`
+              },
+              {
+                role: "user",
+                content: chunk
+              }
+            ],
+            temperature: 0.7
+          });
         });
 
         Logger.info("Chunk summarization completed", {
