@@ -35,6 +35,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useMutation } from "@tanstack/react-query";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface FileListProps {
   boardId: number;
@@ -50,6 +57,7 @@ interface FileWithTags extends Omit<File, 'createdAt'> {
 interface AIAnalysisResult {
   summary: string;
   explanation: string;
+  educationLevel?: string;
 }
 
 interface QuizQuestion {
@@ -76,11 +84,14 @@ export default function FileList({ boardId }: FileListProps) {
   const [selectedFiles, setSelectedFiles] = useState<number[]>([]);
   const [analysisResult, setAnalysisResult] = useState<AIAnalysisResult | null>(null);
   const [quizResult, setQuizResult] = useState<QuizResult | null>(null);
+  const [educationLevel, setEducationLevel] = useState("high_school");
 
   const analyzeMutation = useMutation({
     mutationFn: async (fileId: number) => {
       const response = await fetch(`/api/boards/${boardId}/files/${fileId}/analyze`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ educationLevel }),
         credentials: 'include',
       });
       if (!response.ok) throw new Error(await response.text());
@@ -93,7 +104,7 @@ export default function FileList({ boardId }: FileListProps) {
       const response = await fetch(`/api/boards/${boardId}/files/analyze-multiple`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileIds }),
+        body: JSON.stringify({ fileIds, educationLevel }),
         credentials: 'include',
       });
       if (!response.ok) throw new Error(await response.text());
@@ -276,10 +287,24 @@ export default function FileList({ boardId }: FileListProps) {
               <CheckSquare className="h-4 w-4" />
               <span>{selectedFiles.length} files selected</span>
             </div>
-            <Button onClick={handleAnalyzeMultiple} disabled={analyzeMultipleMutation.isPending}>
-              <Brain className="mr-2 h-4 w-4" />
-              Analyze Together
-            </Button>
+            <div className="flex items-center gap-4">
+              <Select value={educationLevel} onValueChange={setEducationLevel}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Select level" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="elementary">Elementary School</SelectItem>
+                  <SelectItem value="middle">Middle School</SelectItem>
+                  <SelectItem value="high_school">High School</SelectItem>
+                  <SelectItem value="college">College</SelectItem>
+                  <SelectItem value="graduate">Graduate Level</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button onClick={handleAnalyzeMultiple} disabled={analyzeMultipleMutation.isPending}>
+                <Brain className="mr-2 h-4 w-4" />
+                Analyze Together
+              </Button>
+            </div>
           </div>
         )}
 
@@ -320,7 +345,12 @@ export default function FileList({ boardId }: FileListProps) {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => handleAnalyze(file.id)}>
+                        <DropdownMenuItem 
+                          onClick={() => {
+                            setEducationLevel("high_school"); // Reset to default
+                            handleAnalyze(file.id);
+                          }}
+                        >
                           <Brain className="mr-2 h-4 w-4" />
                           Analyze
                         </DropdownMenuItem>
@@ -373,7 +403,7 @@ export default function FileList({ boardId }: FileListProps) {
       <Dialog open={showAnalysisDialog} onOpenChange={setShowAnalysisDialog}>
         <DialogContent className="max-w-3xl">
           <DialogHeader>
-            <DialogTitle>AI Analysis</DialogTitle>
+            <DialogTitle>AI Analysis ({educationLevel.replace('_', ' ')})</DialogTitle>
             <DialogDescription>
               Here's what I found in the {selectedFiles.length > 1 ? 'files' : 'file'}
             </DialogDescription>

@@ -25,43 +25,111 @@ interface QuizResult {
   questions: QuizQuestion[];
 }
 
-export async function analyzeContent(content: string, level: string = 'high'): Promise<AnalysisResult> {
+// Helper function to chunk text
+function chunkText(text: string, maxChunkSize: number = 8000): string[] {
+  const chunks: string[] = [];
+  let currentChunk = '';
+  const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+
+  for (const sentence of sentences) {
+    if ((currentChunk + sentence).length <= maxChunkSize) {
+      currentChunk += sentence;
+    } else {
+      if (currentChunk) chunks.push(currentChunk.trim());
+      currentChunk = sentence;
+    }
+  }
+
+  if (currentChunk) chunks.push(currentChunk.trim());
+  return chunks;
+}
+
+export async function analyzeContent(content: string, level: string = 'high_school'): Promise<AnalysisResult> {
   try {
     Logger.info("Analyzing content with OpenAI", { level });
 
-    const response = await openai.chat.completions.create({
+    // Split content into manageable chunks
+    const chunks = chunkText(content);
+    let combinedAnalysis = '';
+
+    // Analyze each chunk
+    for (const chunk of chunks) {
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          {
+            role: "system",
+            content: `You are an expert study assistant. Analyze the provided content and return a JSON object containing a concise summary and detailed explanation, tailored for a ${level} level audience. Format: { 'summary': string, 'explanation': string }`
+          },
+          {
+            role: "user",
+            content: chunk
+          }
+        ],
+        response_format: { type: "json_object" },
+      });
+
+      const result = JSON.parse(response.choices[0].message.content);
+      combinedAnalysis += result.explanation + '\n\n';
+    }
+
+    // Generate final summary
+    const finalResponse = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
         {
           role: "system",
-          content: `You are an expert study assistant. Analyze the provided content and return a JSON object containing a concise summary and detailed explanation, tailored for a ${level} school level audience. Format: { 'summary': string, 'explanation': string }`
+          content: `You are an expert study assistant. Create a concise final summary of the following analysis, tailored for a ${level} level audience. Format: { 'summary': string, 'explanation': string }`
         },
         {
           role: "user",
-          content
+          content: combinedAnalysis
         }
       ],
       response_format: { type: "json_object" },
     });
 
-    const result = JSON.parse(response.choices[0].message.content);
-    return result as AnalysisResult;
+    return JSON.parse(finalResponse.choices[0].message.content) as AnalysisResult;
   } catch (error) {
     Logger.error("Error analyzing content with OpenAI", error as Error);
     throw new Error("Failed to analyze content");
   }
 }
 
-export async function generateQuiz(content: string, level: string = 'high'): Promise<QuizResult> {
+export async function generateQuiz(content: string, level: string = 'high_school'): Promise<QuizResult> {
   try {
     Logger.info("Generating quiz with OpenAI", { level });
 
+    // Split content into manageable chunks for analysis
+    const chunks = chunkText(content);
+    let combinedContent = '';
+
+    // Analyze each chunk for key points
+    for (const chunk of chunks) {
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          {
+            role: "system",
+            content: "Extract and summarize the key points from this content that would be suitable for quiz questions."
+          },
+          {
+            role: "user",
+            content: chunk
+          }
+        ]
+      });
+
+      combinedContent += response.choices[0].message.content + '\n\n';
+    }
+
+    // Generate final quiz based on key points
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
         {
           role: "system",
-          content: `You are an expert quiz generator. Create a quiz based on the provided content, tailored for a ${level} school level audience.
+          content: `You are an expert quiz generator. Create a quiz based on the provided content summary, tailored for a ${level} level audience.
           Return a JSON object with the following format:
           {
             'topic': string, // Main topic of the content
@@ -78,7 +146,7 @@ export async function generateQuiz(content: string, level: string = 'high'): Pro
         },
         {
           role: "user",
-          content
+          content: combinedContent
         }
       ],
       response_format: { type: "json_object" },
@@ -92,22 +160,47 @@ export async function generateQuiz(content: string, level: string = 'high'): Pro
   }
 }
 
-export async function analyzeMultipleContents(contents: string[], level: string = 'high'): Promise<AnalysisResult> {
+export async function analyzeMultipleContents(contents: string[], level: string = 'high_school'): Promise<AnalysisResult> {
   try {
     Logger.info("Analyzing multiple contents with OpenAI", { level });
 
-    const combinedContent = contents.join("\n\n=== Next Document ===\n\n");
+    // Process each content separately first
+    const analyses = await Promise.all(contents.map(async (content) => {
+      const chunks = chunkText(content);
+      let analysis = '';
 
+      for (const chunk of chunks) {
+        const response = await openai.chat.completions.create({
+          model: "gpt-4o",
+          messages: [
+            {
+              role: "system",
+              content: "Analyze this content and extract the key points and concepts."
+            },
+            {
+              role: "user",
+              content: chunk
+            }
+          ]
+        });
+
+        analysis += response.choices[0].message.content + '\n\n';
+      }
+
+      return analysis;
+    }));
+
+    // Combine analyses and generate final summary
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
         {
           role: "system",
-          content: `You are an expert study assistant. Analyze the provided multiple documents and return a JSON object containing a unified summary and detailed explanation that connects the key concepts across all documents, tailored for a ${level} school level audience. Format: { 'summary': string, 'explanation': string }`
+          content: `You are an expert study assistant. Create a unified analysis of multiple related documents, tailored for a ${level} level audience. Return a JSON object with format: { 'summary': string, 'explanation': string }`
         },
         {
-          role: "user",
-          content: combinedContent
+          "role": "user",
+          "content": analyses.join("\n=== Next Document ===\n")
         }
       ],
       response_format: { type: "json_object" },

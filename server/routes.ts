@@ -938,13 +938,16 @@ export function registerRoutes(app: Express): Server {
       const filePath = path.join(process.cwd(), 'uploads', file.filename);
       const content = await readFile(filePath, 'utf-8');
 
+      const educationLevel = req.body.educationLevel || 'high_school';
+
       // Get analysis
-      const analysis = await analyzeContent(content);
+      const analysis = await analyzeContent(content, educationLevel);
 
       Logger.info("File analyzed successfully", {
         fileId: req.params.fileId,
         boardId: req.params.boardId,
         userId: req.user?.id,
+        educationLevel,
       });
 
       res.json(analysis);
@@ -954,6 +957,12 @@ export function registerRoutes(app: Express): Server {
         boardId: req.params.boardId,
         fileId: req.params.fileId,
       });
+
+      // Check if error is due to token limit
+      if ((error as Error).message.includes('Request too large')) {
+        return res.status(413).send("File is too large to analyze. Try breaking it into smaller sections.");
+      }
+
       res.status(500).send("Failed to analyze file");
     }
   });
@@ -986,81 +995,32 @@ export function registerRoutes(app: Express): Server {
       const filePath = path.join(process.cwd(), 'uploads', file.filename);
       const content = await readFile(filePath, 'utf-8');
 
+      const educationLevel = req.body.educationLevel || 'high_school';
+
       // Generate quiz
-      const quiz = await generateQuiz(content);
+      const quiz = await generateQuiz(content, educationLevel);
 
       Logger.info("Quiz generated successfully", {
         fileId: req.params.fileId,
         boardId: req.params.boardId,
         userId: req.user?.id,
+        educationLevel,
       });
 
       res.json(quiz);
     } catch (error) {
-      Logger.error("Error generating quiz", error as Error, {        userId: req.user?.id,
+      Logger.error("Error generating quiz", error as Error, {
+        userId: req.user?.id,
         boardId: req.params.boardId,
         fileId: req.params.fileId,
       });
+
+      // Check if error is due to token limit
+      if ((error as Error).message.includes('Request too large')) {
+        return res.status(413).send("File is too large for quiz generation. Try breaking it into smaller sections.");
+      }
+
       res.status(500).send("Failed to generate quiz");
-    }
-  });
-
-  // Analyze multiple files
-  app.post("/api/boards/:boardId/files/analyze-multiple", async (req, res) => {
-    if (!req.isAuthenticated()) {
-      Logger.warn("Unauthorized multiple file analysis attempt", {
-        ip: req.ip,
-        headers: req.headers,
-        boardId: req.params.boardId,
-      });
-      return res.status(401).send("Not authenticated");
-    }
-
-    try {
-      const fileIds = req.body.fileIds as number[];
-      if (!Array.isArray(fileIds) || fileIds.length === 0) {
-        return res.status(400).send("No files selected");
-      }
-
-      // Get all files
-      const selectedFiles = await db
-        .select()
-        .from(files)
-        .where(
-          and(
-            eq(files.boardId, parseInt(req.params.boardId)),
-            sql`${files.id} = ANY(${fileIds})`
-          )
-        );
-
-      if (selectedFiles.length === 0) {
-        return res.status(404).send("No files found");
-      }
-
-      // Read all file contents
-      const contents = await Promise.all(
-        selectedFiles.map(async (file) => {
-          const filePath = path.join(process.cwd(), 'uploads', file.filename);
-          return readFile(filePath, 'utf-8');
-        })
-      );
-
-      // Get combined analysis
-      const analysis = await analyzeMultipleContents(contents);
-
-      Logger.info("Multiple files analyzed successfully", {
-        fileCount: fileIds.length,
-        boardId: req.params.boardId,
-        userId: req.user?.id,
-      });
-
-      res.json(analysis);
-    } catch (error) {
-      Logger.error("Error analyzing multiple files", error as Error, {
-        userId: req.user?.id,
-        boardId: req.params.boardId,
-      });
-      res.status(500).send("Failed to analyze files");
     }
   });
 
