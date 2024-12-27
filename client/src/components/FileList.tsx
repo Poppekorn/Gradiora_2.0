@@ -3,9 +3,22 @@ import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { File as FileIcon, Tag } from "lucide-react";
 import { format } from "date-fns";
+import type { FileTag, Tag as TagType } from "@db/schema";
 
 interface FileListProps {
   boardId: number;
+}
+
+interface FileWithTags {
+  id: number;
+  filename: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+  boardId: number;
+  uploadedBy: number;
+  createdAt: Date;
+  tags: TagType[];
 }
 
 export default function FileList({ boardId }: FileListProps) {
@@ -30,7 +43,7 @@ export default function FileList({ boardId }: FileListProps) {
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-      {files.map((file) => (
+      {files.map((file: FileWithTags) => (
         <Card key={file.id}>
           <CardHeader>
             <div className="flex items-center gap-2">

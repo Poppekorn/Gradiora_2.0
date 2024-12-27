@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useFiles } from "@/hooks/use-files";
 import { useTiles } from "@/hooks/use-tiles";
 import { useToast } from "@/hooks/use-toast";
@@ -13,13 +13,6 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Loader2, Upload } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import type { Tag } from "@db/schema";
@@ -34,7 +27,7 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
   const [loading, setLoading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedTags, setSelectedTags] = useState<number[]>([]);
-  
+
   const { uploadFile, createTag, tags } = useFiles(boardId);
   const { tiles } = useTiles(boardId);
   const { toast } = useToast();
@@ -79,12 +72,12 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
   // Ensure each study unit has a corresponding tag
   const ensureStudyUnitTags = async () => {
     if (!tiles) return;
-    
+
     for (const tile of tiles) {
       const tagExists = tags?.some(
         tag => tag.name === tile.title && tag.isStudyUnitTag
       );
-      
+
       if (!tagExists) {
         try {
           await createTag({
@@ -106,10 +99,10 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
     );
   };
 
-  // Ensure study unit tags exist when the component mounts
-  React.useEffect(() => {
+  // Ensure study unit tags exist when the component mounts or tiles change
+  useEffect(() => {
     ensureStudyUnitTags();
-  }, [tiles]);
+  }, [tiles, tags]);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
