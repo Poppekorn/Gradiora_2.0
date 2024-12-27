@@ -8,7 +8,7 @@ import Logger from "./utils/logger";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
-import { summarizeContent, getQuotaInfo } from "./services/openai";
+import { summarizeContent, getQuotaInfo, getStoredSummary } from "./services/openai";
 import { readFile } from "fs/promises";
 
 // Configure multer for file upload
@@ -201,7 +201,7 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  // Summarize endpoint
+  // Summarize endpoint (Corrected version from edited snippet)
   app.post("/api/boards/:boardId/files/:fileId/summarize", async (req, res) => {
     if (!req.isAuthenticated()) {
       return res.status(401).send("Not authenticated");
@@ -239,7 +239,7 @@ export function registerRoutes(app: Express): Server {
         educationLevel,
       });
 
-      const summary = await summarizeContent(content, educationLevel, req.user!.id);
+      const summary = await summarizeContent(content, educationLevel, req.user!.id, parseInt(req.params.fileId));
 
       Logger.info("File summarized successfully", {
         fileId: req.params.fileId,
@@ -276,6 +276,27 @@ export function registerRoutes(app: Express): Server {
       res.status(500).send("Failed to summarize file");
     }
   });
+
+  // Add a new endpoint to get stored summaries
+  app.get("/api/boards/:boardId/files/:fileId/summary", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.status(401).send("Not authenticated");
+    }
+
+    try {
+      const summary = await getStoredSummary(parseInt(req.params.fileId));
+
+      if (!summary) {
+        return res.status(404).send("Summary not found");
+      }
+
+      res.json(summary);
+    } catch (error) {
+      Logger.error("Error fetching summary", error as Error);
+      res.status(500).send("Failed to fetch summary");
+    }
+  });
+
 
   // Boards API
   app.get("/api/boards", async (req, res) => {
@@ -1041,82 +1062,6 @@ export function registerRoutes(app: Express): Server {
         boardId: req.params.boardId,
       });
       res.status(500).send("Failed to fetch tags");
-    }
-  });
-
-  // Summarize endpoint (Corrected version from edited snippet)
-  app.post("/api/boards/:boardId/files/:fileId/summarize", async (req, res) => {
-    if (!req.isAuthenticated()) {
-      return res.status(401).send("Not authenticated");
-    }
-
-    try {
-      Logger.info("Starting file summarization", {
-        boardId: req.params.boardId,
-        fileId: req.params.fileId,
-        userId: req.user?.id,
-      });
-
-      const [file] = await db
-        .select()
-        .from(files)
-        .where(eq(files.id, parseInt(req.params.fileId)))
-        .limit(1);
-
-      if (!file) {
-        Logger.warn("File not found for summarization", {
-          fileId: req.params.fileId,
-          boardId: req.params.boardId,
-        });
-        return res.status(404).send("File not found");
-      }
-
-      const filePath = path.join(process.cwd(), 'uploads', file.filename);
-      const content = await readFile(filePath, 'utf-8');
-
-      const educationLevel = req.body.educationLevel || 'high_school';
-
-      Logger.info("Summarizing file content", {
-        fileId: req.params.fileId,
-        contentLength: content.length,
-        educationLevel,
-      });
-
-      const summary = await summarizeContent(content, educationLevel, req.user!.id);
-
-      Logger.info("File summarized successfully", {
-        fileId: req.params.fileId,
-        boardId: req.params.boardId,
-        userId: req.user?.id,
-        educationLevel,
-      });
-
-      res.json(summary);
-    } catch (error) {
-      Logger.error("Error summarizing file", error as Error, {
-        userId: req.user?.id,
-        boardId: req.params.boardId,
-        fileId: req.params.fileId,
-        errorMessage: (error as Error).message,
-      });
-
-      if ((error as Error).message.includes('quota exceeded')) {
-        return res.status(429).send("API quota exceeded. Please try again later.");
-      }
-
-      if ((error as Error).message.includes('Invalid API key')) {
-        return res.status(401).send("API configuration error. Please contact support.");
-      }
-
-      if ((error as Error).message.includes('Request too large')) {
-        return res.status(413).send("File is too large to summarize. Try breaking it into smaller sections.");
-      }
-
-      if ((error as Error).message.includes('Empty content')) {
-        return res.status(400).send("Cannot summarize empty file content");
-      }
-
-      res.status(500).send("Failed to summarize file");
     }
   });
 

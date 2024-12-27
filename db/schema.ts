@@ -116,6 +116,45 @@ export type ApiQuota = typeof apiQuota.$inferSelect;
 export type NewApiQuota = typeof apiQuota.$inferInsert;
 
 
+// New table for file summaries
+export const fileSummaries = pgTable("file_summaries", {
+  id: serial("id").primaryKey(),
+  fileId: integer("file_id").references(() => files.id).notNull(),
+  summary: text("summary").notNull(),
+  explanation: text("explanation").notNull(),
+  educationLevel: text("education_level").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Add relations for fileSummaries
+export const fileSummariesRelations = relations(fileSummaries, ({ one }) => ({
+  file: one(files, {
+    fields: [fileSummaries.fileId],
+    references: [files.id],
+  }),
+}));
+
+// Add to files relations
+export const filesRelations = relations(files, ({ many, one }) => ({
+  tags: many(fileTags),
+  summaries: many(fileSummaries),
+  board: one(boards, {
+    fields: [files.boardId],
+    references: [boards.id],
+  }),
+  uploader: one(users, {
+    fields: [files.uploadedBy],
+    references: [users.id],
+  }),
+}));
+
+// Create schemas for the new table
+export const insertFileSummarySchema = createInsertSchema(fileSummaries);
+export const selectFileSummarySchema = createSelectSchema(fileSummaries);
+export type FileSummary = typeof fileSummaries.$inferSelect;
+export type NewFileSummary = typeof fileSummaries.$inferInsert;
+
 // Relations
 export const organizationsRelations = relations(organizations, ({ many }) => ({
   users: many(users),
@@ -141,6 +180,7 @@ export const tilesRelations = relations(tiles, ({ one }) => ({
 
 export const filesRelations = relations(files, ({ many, one }) => ({
   tags: many(fileTags),
+  summaries: many(fileSummaries),
   board: one(boards, {
     fields: [files.boardId],
     references: [boards.id],

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useFiles } from "@/hooks/use-files";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { File as FileIcon, Tag, Plus, Trash2, X, MoreVertical, BookOpen, Loader2 } from "lucide-react";
+import { File as FileIcon, Tag, Plus, Trash2, X, MoreVertical, BookOpen, Loader2, StickyNote } from "lucide-react";
 import { format } from "date-fns";
 import type { File, Tag as TagType } from "@db/schema";
 import {
@@ -41,6 +41,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import type { FileSummary } from "@db/schema";
 
 interface FileListProps {
   boardId: number;
@@ -68,6 +69,7 @@ export default function FileList({ boardId }: FileListProps) {
   const [showSummaryDialog, setShowSummaryDialog] = useState(false);
   const [summaryResult, setSummaryResult] = useState<SummaryResult | null>(null);
   const [educationLevel, setEducationLevel] = useState("high_school");
+  const [storedSummary, setStoredSummary] = useState<FileSummary | null>(null);
 
   const summaryMutation = useMutation({
     mutationFn: async (fileId: number) => {
@@ -75,6 +77,16 @@ export default function FileList({ boardId }: FileListProps) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ educationLevel }),
+        credentials: 'include',
+      });
+      if (!response.ok) throw new Error(await response.text());
+      return response.json();
+    },
+  });
+
+  const getSummary = useMutation({
+    mutationFn: async (fileId: number) => {
+      const response = await fetch(`/api/boards/${boardId}/files/${fileId}/summary`, {
         credentials: 'include',
       });
       if (!response.ok) throw new Error(await response.text());
@@ -99,6 +111,24 @@ export default function FileList({ boardId }: FileListProps) {
           variant: "destructive",
           title: "Error",
           description: "Failed to summarize file. Please try again.",
+        });
+      }
+    }
+  };
+
+  const handleViewSummary = async (fileId: number) => {
+    try {
+      const summary = await getSummary.mutateAsync(fileId);
+      setStoredSummary(summary);
+      setShowSummaryDialog(true);
+    } catch (error) {
+      if ((error as Error).message.includes('not found')) {
+        handleSummarize(fileId);
+      } else {
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: "Failed to fetch summary. Please try again.",
         });
       }
     }
@@ -257,15 +287,15 @@ export default function FileList({ boardId }: FileListProps) {
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
                         <DropdownMenuItem
-                          onClick={() => handleSummarize(file.id)}
-                          disabled={summaryMutation.isPending}
+                          onClick={() => handleViewSummary(file.id)}
+                          disabled={summaryMutation.isPending || getSummary.isPending}
                         >
-                          {summaryMutation.isPending ? (
+                          {summaryMutation.isPending || getSummary.isPending ? (
                             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                           ) : (
-                            <BookOpen className="mr-2 h-4 w-4" />
+                            <StickyNote className="mr-2 h-4 w-4" />
                           )}
-                          Summarize
+                          View Summary
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => handleDeleteFile(file.id)} className="text-red-500">
                           <Trash2 className="mr-2 h-4 w-4" />
@@ -318,20 +348,26 @@ export default function FileList({ boardId }: FileListProps) {
             </DialogDescription>
           </DialogHeader>
           <ScrollArea className="h-[60vh] py-4">
-            {summaryMutation.isPending ? (
+            {(summaryMutation.isPending || getSummary.isPending) ? (
               <div className="flex items-center justify-center h-full">
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                <span className="ml-2 text-muted-foreground">Generating summary...</span>
+                <span className="ml-2 text-muted-foreground">
+                  {storedSummary ? "Fetching summary..." : "Generating summary..."}
+                </span>
               </div>
-            ) : summaryResult ? (
+            ) : (storedSummary || summaryResult) ? (
               <div className="space-y-6">
                 <div className="p-4 bg-muted rounded-lg">
                   <h3 className="text-lg font-semibold mb-2">Summary</h3>
-                  <p className="text-muted-foreground whitespace-pre-wrap">{summaryResult.summary}</p>
+                  <p className="text-muted-foreground whitespace-pre-wrap">
+                    {storedSummary?.summary || summaryResult?.summary}
+                  </p>
                 </div>
                 <div className="p-4 bg-muted rounded-lg">
                   <h3 className="text-lg font-semibold mb-2">Detailed Explanation</h3>
-                  <p className="text-muted-foreground whitespace-pre-wrap">{summaryResult.explanation}</p>
+                  <p className="text-muted-foreground whitespace-pre-wrap">
+                    {storedSummary?.explanation || summaryResult?.explanation}
+                  </p>
                 </div>
               </div>
             ) : (

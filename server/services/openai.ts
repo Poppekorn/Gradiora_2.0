@@ -1,8 +1,8 @@
 import OpenAI from "openai";
 import Logger from "../utils/logger";
 import { db } from "@db";
-import { apiQuota } from "@db/schema";
-import { eq } from "drizzle-orm";
+import { apiQuota, fileSummaries } from "@db/schema";
+import { eq, desc } from "drizzle-orm";
 
 if (!process.env.OPENAI_API_KEY) {
   throw new Error("OPENAI_API_KEY environment variable is not set");
@@ -76,7 +76,7 @@ async function manageQuota(userId: number, tokenCount: number) {
       resetAt: resetDate,
     }).onConflictDoUpdate({
       target: apiQuota.userId,
-      set: { 
+      set: {
         tokenCount,
         callCount: 1,
         resetAt: resetDate,
@@ -99,7 +99,7 @@ async function processChunks(chunks: string[], userId: number, level: string): P
       messages: [
         {
           role: "system",
-          content: `Summarize the following text for ${level} students. Use 150 words for the summary and 300 for the explanation. Separate them clearly. Focus on key concepts.`
+          content: `You are a professional educator summarizing content for ${level} students. Focus only on explaining the main concepts and key points. Your summary should be clear, concise, and appropriate for the education level. Do not include any technical details about file formats or data structure.`
         },
         {
           role: "user",
@@ -130,7 +130,7 @@ async function processChunks(chunks: string[], userId: number, level: string): P
   };
 }
 
-export async function summarizeContent(content: string, level: string = 'high_school', userId: number): Promise<AnalysisResult> {
+export async function summarizeContent(content: string, level: string = 'high_school', userId: number, fileId: number): Promise<AnalysisResult> {
   Logger.info("Summarizing content with OpenAI", { level, contentLength: content.length });
 
   if (!content.trim()) {
@@ -142,6 +142,14 @@ export async function summarizeContent(content: string, level: string = 'high_sc
 
   const result = await processChunks(chunks, userId, level);
 
+  // Store the summary in the database
+  await db.insert(fileSummaries).values({
+    fileId,
+    summary: result.summary,
+    explanation: result.explanation,
+    educationLevel: level,
+  });
+
   Logger.info("Summarization completed", {
     chunksProcessed: chunks.length,
     totalTokensUsed: result.summary.length + result.explanation.length
@@ -150,12 +158,21 @@ export async function summarizeContent(content: string, level: string = 'high_sc
   return result;
 }
 
-export async function getQuotaInfo(userId: number) {
-  const [quota] = await db
+export async function getStoredSummary(fileId: number): Promise<FileSummary | null> {
+  const [summary] = await db
     .select()
-    .from(apiQuota)
-    .where(eq(apiQuota.userId, userId))
+    .from(fileSummaries)
+    .where(eq(fileSummaries.fileId, fileId))
+    .orderBy(desc(fileSummaries.createdAt))
     .limit(1);
 
-  return quota;
+  return summary || null;
+}
+
+interface FileSummary {
+  fileId: number;
+  summary: string;
+  explanation: string;
+  educationLevel: string;
+  createdAt: Date;
 }
