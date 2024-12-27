@@ -41,10 +41,18 @@ async function retryOperation<T>(
   try {
     return await operation();
   } catch (error) {
-    if (retries === 0 || !(error instanceof Error)) throw error;
+    if (retries === 0 || !(error instanceof Error)) {
+      // Enhance error messages for common OpenAI API issues
+      if (error.message?.includes('429')) {
+        throw new Error('OpenAI API quota exceeded. Please try again later.');
+      }
+      if (error.message?.includes('401')) {
+        throw new Error('Invalid API key. Please check your OpenAI API configuration.');
+      }
+      throw error;
+    }
 
     if (error.message.includes('Rate limit reached')) {
-      // Wait longer for rate limit errors
       await new Promise(resolve => setTimeout(resolve, delay * 2));
     } else {
       await new Promise(resolve => setTimeout(resolve, delay));
@@ -67,7 +75,6 @@ export async function summarizeContent(content: string, level: string = 'high_sc
 
     let summaries: AnalysisResult[] = [];
 
-    // Process chunks with retry logic
     for (const chunk of chunks) {
       try {
         const response = await retryOperation(async () => {
@@ -97,7 +104,6 @@ export async function summarizeContent(content: string, level: string = 'high_sc
           throw new Error("Empty response from OpenAI");
         }
 
-        // Split the response into summary and explanation
         const parts = result.split('\n\n');
         summaries.push({
           summary: parts[0] || '',
@@ -113,7 +119,6 @@ export async function summarizeContent(content: string, level: string = 'high_sc
       }
     }
 
-    // Combine all summaries into a final summary
     const combinedSummary = {
       summary: summaries.map(s => s.summary).join('\n').trim(),
       explanation: summaries.map(s => s.explanation).join('\n\n').trim()
@@ -131,6 +136,15 @@ export async function summarizeContent(content: string, level: string = 'high_sc
       level,
       errorMessage: (error as Error).message
     });
+
+    // Enhance error messages for users
+    if (error.message?.includes('quota exceeded')) {
+      throw new Error('OpenAI API quota exceeded. Please try again later.');
+    }
+    if (error.message?.includes('401')) {
+      throw new Error('Invalid API key. Please check your OpenAI API configuration.');
+    }
+
     throw new Error("Failed to summarize content: " + (error as Error).message);
   }
 }

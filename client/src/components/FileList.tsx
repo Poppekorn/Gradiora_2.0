@@ -88,11 +88,19 @@ export default function FileList({ boardId }: FileListProps) {
       setSummaryResult(result);
       setShowSummaryDialog(true);
     } catch (error) {
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description: "Failed to summarize file",
-      });
+      if (error.message?.includes('quota exceeded') || error.message?.includes('check your plan')) {
+        toast({
+          variant: "destructive",
+          title: "API Quota Exceeded",
+          description: "The AI service is temporarily unavailable. Please try again later.",
+        });
+      } else {
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: "Failed to summarize file. Please try again.",
+        });
+      }
     }
   };
 
@@ -248,7 +256,7 @@ export default function FileList({ boardId }: FileListProps) {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem 
+                        <DropdownMenuItem
                           onClick={() => handleSummarize(file.id)}
                           disabled={summaryMutation.isPending}
                         >

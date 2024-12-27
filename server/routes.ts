@@ -227,6 +227,14 @@ export function registerRoutes(app: Express): Server {
         errorMessage: (error as Error).message,
       });
 
+      if ((error as Error).message.includes('quota exceeded')) {
+        return res.status(429).send("API quota exceeded. Please try again later.");
+      }
+
+      if ((error as Error).message.includes('Invalid API key')) {
+        return res.status(401).send("API configuration error. Please contact support.");
+      }
+
       if ((error as Error).message.includes('Request too large')) {
         return res.status(413).send("File is too large to summarize. Try breaking it into smaller sections.");
       }
@@ -1061,6 +1069,14 @@ export function registerRoutes(app: Express): Server {
         fileId: req.params.fileId,
         errorMessage: (error as Error).message,
       });
+
+      if ((error as Error).message.includes('quota exceeded')) {
+        return res.status(429).send("API quota exceeded. Please try again later.");
+      }
+
+      if ((error as Error).message.includes('Invalid API key')) {
+        return res.status(401).send("API configuration error. Please contact support.");
+      }
 
       if ((error as Error).message.includes('Request too large')) {
         return res.status(413).send("File is too large to summarize. Try breaking it into smaller sections.");
