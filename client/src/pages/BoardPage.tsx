@@ -14,8 +14,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Link } from "wouter";
 
 export default function BoardPage() {
-  const [, params] = useRoute("/board/:id");
-  const boardId = parseInt(params?.id || "0");
+  const [match, params] = useRoute("/boards/:id");
+  const boardId = params ? parseInt(params.id) : 0;
   const { boards } = useBoards();
   const { tiles, isLoading } = useTiles(boardId);
   const { optimizeSchedule, isOptimizing } = useOptimizeSchedule(boardId);
@@ -57,7 +57,7 @@ export default function BoardPage() {
           <Button
             variant="outline"
             onClick={() => optimizeSchedule()}
-            disabled={isOptimizing || tiles?.length === 0}
+            disabled={isOptimizing || !tiles || tiles.length === 0}
           >
             <Sparkles className="mr-2 h-4 w-4" />
             {isOptimizing ? "Optimizing..." : "Optimize Schedule"}
@@ -82,7 +82,7 @@ export default function BoardPage() {
                     <Skeleton key={i} className="h-48" />
                   ))}
                 </div>
-              ) : tiles?.length === 0 ? (
+              ) : !tiles || tiles.length === 0 ? (
                 <div className="text-center py-12">
                   <h2 className="text-2xl font-semibold text-muted-foreground mb-2">
                     No study units yet
@@ -93,7 +93,7 @@ export default function BoardPage() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {tiles?.map((tile) => (
+                  {tiles.map((tile) => (
                     <TileCard key={tile.id} tile={tile} />
                   ))}
                 </div>

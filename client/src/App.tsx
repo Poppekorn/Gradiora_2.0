@@ -29,6 +29,8 @@ function App() {
       <Route path="/" component={DashboardPage} />
       <Route path="/boards/:boardId" component={BoardPage} />
       <Route path="/boards/:boardId/tiles/:tileId" component={StudyUnitPage} />
+      <Route path="/board/:boardId" component={BoardPage} /> {/* Added to handle singular route */}
+
     </Switch>
   );
 }
