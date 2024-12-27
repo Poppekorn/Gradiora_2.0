@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Loader2, Upload } from "lucide-react";
+import { Loader2, Upload, Plus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import type { Tag } from "@db/schema";
 
@@ -48,6 +48,7 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
   const [loading, setLoading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedTags, setSelectedTags] = useState<number[]>([]);
+  const [newTagName, setNewTagName] = useState("");
 
   const { uploadFile, createTag, tags } = useFiles(boardId);
   const { tiles } = useTiles(boardId);
@@ -112,41 +113,55 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
     }
   };
 
-  // Ensure each study unit has a corresponding tag
-  const ensureStudyUnitTags = async () => {
-    if (!tiles) return;
+  const handleCreateTag = async () => {
+    if (!newTagName.trim()) return;
 
-    // Create tag for the class itself
     try {
-      const board = tiles[0]?.boardId;
-      if (board) {
-        await createTag({
-          name: `Class ${board}`,
-          isStudyUnitTag: false,
-        });
-      }
+      await createTag({
+        name: newTagName.trim(),
+        isStudyUnitTag: false,
+      });
+      setNewTagName("");
+      toast({
+        title: "Success",
+        description: "Tag created successfully",
+      });
     } catch (error) {
-      console.error("Failed to create class tag:", error);
-    }
-
-    // Create tags for each study unit
-    for (const tile of tiles) {
-      const tagExists = tags?.some(
-        tag => tag.name === tile.title && tag.isStudyUnitTag
-      );
-
-      if (!tagExists) {
-        try {
-          await createTag({
-            name: tile.title,
-            isStudyUnitTag: true,
-          });
-        } catch (error) {
-          console.error(`Failed to create tag for study unit ${tile.title}:`, error);
-        }
-      }
+      console.error("Failed to create tag:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to create tag",
+      });
     }
   };
+
+  // Ensure study unit tags exist when the component mounts or tiles change
+  useEffect(() => {
+    const createMissingTags = async () => {
+      if (!tiles) return;
+
+      // Create tags for each study unit if they don't exist
+      for (const tile of tiles) {
+        const tagExists = tags?.some(
+          tag => tag.name === tile.title && tag.isStudyUnitTag
+        );
+
+        if (!tagExists) {
+          try {
+            await createTag({
+              name: tile.title,
+              isStudyUnitTag: true,
+            });
+          } catch (error) {
+            console.error(`Failed to create tag for study unit ${tile.title}:`, error);
+          }
+        }
+      }
+    };
+
+    createMissingTags();
+  }, [tiles, tags]);
 
   const toggleTag = (tagId: number) => {
     setSelectedTags(prev =>
@@ -155,11 +170,6 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
         : [...prev, tagId]
     );
   };
-
-  // Ensure study unit tags exist when the component mounts or tiles change
-  useEffect(() => {
-    ensureStudyUnitTags();
-  }, [tiles, tags]);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -190,7 +200,26 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
           </div>
 
           <div className="space-y-2">
-            <Label>Tags</Label>
+            <div className="flex items-center justify-between">
+              <Label>Tags</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  placeholder="New tag name"
+                  value={newTagName}
+                  onChange={(e) => setNewTagName(e.target.value)}
+                  className="w-[200px]"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  onClick={handleCreateTag}
+                  disabled={!newTagName.trim()}
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
             <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-2 border rounded-lg">
               {tags?.map((tag: Tag) => (
                 <Badge
