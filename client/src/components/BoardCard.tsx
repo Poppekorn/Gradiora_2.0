@@ -53,8 +53,11 @@ export default function BoardCard({ board }: BoardCardProps) {
   };
 
   const handleClick = (e: React.MouseEvent) => {
-    // Don't navigate if clicking on buttons or links
-    if ((e.target as HTMLElement).closest('button, a')) {
+    // Don't navigate if clicking on buttons, links, or dropdown menu
+    if (
+      (e.target as HTMLElement).closest('button, a, [role="menuitem"]')
+    ) {
+      e.stopPropagation();
       return;
     }
     setLocation(`/board/${board.id}`);
@@ -87,11 +90,15 @@ export default function BoardCard({ board }: BoardCardProps) {
               )}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon">
+                  <Button 
+                    variant="ghost" 
+                    size="icon"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <MoreVertical className="h-4 w-4" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
+                <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
                   <DropdownMenuItem onClick={() => setIsEditOpen(true)}>
                     <Edit className="mr-2 h-4 w-4" />
                     Edit
