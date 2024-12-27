@@ -21,23 +21,6 @@ interface BoardCardProps {
   tile: Tile;
 }
 
-interface AIAnalysisResult {
-  summary: string;
-  explanation: string;
-}
-
-interface QuizQuestion {
-  question: string;
-  options: string[];
-  correctAnswer: string;
-  explanation: string;
-}
-
-interface QuizResult {
-  topic: string;
-  questions: QuizQuestion[];
-}
-
 const priorityColors = {
   low: "bg-green-100 text-green-800",
   medium: "bg-yellow-100 text-yellow-800",
@@ -62,7 +45,8 @@ export default function TileCard({ tile }: BoardCardProps) {
   const parentBoard = boards?.find(board => board.id === tile.boardId);
   const parentColor = parentBoard?.color || "#E2E8F0";
 
-  const handleDelete = async () => {
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent navigation
     try {
       await deleteTile(tile.id);
       toast({
@@ -76,6 +60,11 @@ export default function TileCard({ tile }: BoardCardProps) {
         description: "Failed to delete study unit",
       });
     }
+  };
+
+  const handleEdit = (e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent navigation
+    setIsEditOpen(true);
   };
 
   // Parse external links from JSON
@@ -107,23 +96,15 @@ export default function TileCard({ tile }: BoardCardProps) {
                 {tile.status?.replace("_", " ")}
               </Badge>
               <DropdownMenu>
-                <DropdownMenuTrigger asChild>
+                <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
                   <Button variant="ghost" size="icon">
                     <MoreVertical className="h-4 w-4" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => setIsEditOpen(true)}>
+                <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                  <DropdownMenuItem onClick={handleEdit}>
                     <Edit className="mr-2 h-4 w-4" />
                     Edit
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => {}} disabled>
-                    <Brain className="mr-2 h-4 w-4" />
-                    Analyze Content
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => {}} disabled>
-                    <GraduationCap className="mr-2 h-4 w-4" />
-                    Generate Quiz
                   </DropdownMenuItem>
                   <DropdownMenuItem className="text-red-600" onClick={handleDelete}>
                     <Trash2 className="mr-2 h-4 w-4" />
@@ -195,6 +176,7 @@ export default function TileCard({ tile }: BoardCardProps) {
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-sm text-primary hover:underline"
+                      onClick={(e) => e.stopPropagation()}
                     >
                       Resource {index + 1}
                     </a>
