@@ -31,7 +31,7 @@ export default function CreateTileDialog({ children, boardId }: CreateTileDialog
   const [loading, setLoading] = useState(false);
   const { createTile } = useTiles(boardId);
   const { toast } = useToast();
-  
+
   const [formData, setFormData] = useState({
     title: "",
     description: "",
@@ -49,7 +49,7 @@ export default function CreateTileDialog({ children, boardId }: CreateTileDialog
     try {
       await createTile({
         ...formData,
-        dueDate: formData.dueDate ? new Date(formData.dueDate).toISOString() : null,
+        dueDate: formData.dueDate ? new Date(formData.dueDate) : null,
       });
       toast({
         title: "Success",
@@ -95,7 +95,7 @@ export default function CreateTileDialog({ children, boardId }: CreateTileDialog
               required
             />
           </div>
-          
+
           <div className="space-y-2">
             <Label htmlFor="description">Description</Label>
             <Textarea

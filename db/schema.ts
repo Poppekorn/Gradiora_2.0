@@ -65,6 +65,7 @@ export const tilesRelations = relations(tiles, ({ one }) => ({
   }),
 }));
 
+// Schema validation and type exports
 export const insertUserSchema = createInsertSchema(users);
 export const selectUserSchema = createSelectSchema(users);
 export type User = typeof users.$inferSelect;
@@ -84,3 +85,7 @@ export const insertTileSchema = createInsertSchema(tiles);
 export const selectTileSchema = createSelectSchema(tiles);
 export type Tile = typeof tiles.$inferSelect;
 export type NewTile = typeof tiles.$inferInsert;
+
+// Aliases for backward compatibility
+export type InsertUser = NewUser;
+export type SelectUser = User;

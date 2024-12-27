@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Calendar, Link as LinkIcon, Star, Tag } from "lucide-react";
 import { format } from "date-fns";
 
-interface TileCardProps {
+interface BoardCardProps {
   tile: Tile;
 }
 
@@ -21,7 +21,14 @@ const statusColors = {
   needs_review: "bg-yellow-100 text-yellow-800",
 };
 
-export default function TileCard({ tile }: TileCardProps) {
+export default function TileCard({ tile }: BoardCardProps) {
+  // Parse external links from JSON
+  const externalLinks: string[] = Array.isArray(tile.externalLinks) 
+    ? tile.externalLinks 
+    : (typeof tile.externalLinks === 'string' 
+      ? JSON.parse(tile.externalLinks) 
+      : []);
+
   return (
     <Card>
       <CardHeader>
@@ -40,7 +47,7 @@ export default function TileCard({ tile }: TileCardProps) {
             {tile.description}
           </p>
         )}
-        
+
         <div className="space-y-2">
           {tile.dueDate && (
             <div className="flex items-center text-sm">
@@ -48,7 +55,7 @@ export default function TileCard({ tile }: TileCardProps) {
               {format(new Date(tile.dueDate), "PPP")}
             </div>
           )}
-          
+
           {tile.priority && (
             <div className="flex items-center text-sm">
               <Star className="mr-2 h-4 w-4" />
@@ -61,7 +68,7 @@ export default function TileCard({ tile }: TileCardProps) {
           {tile.tags && tile.tags.length > 0 && (
             <div className="flex items-center gap-2 flex-wrap">
               <Tag className="h-4 w-4" />
-              {tile.tags.map((tag, index) => (
+              {tile.tags.map((tag: string, index: number) => (
                 <Badge key={index} variant="secondary">
                   {tag}
                 </Badge>
@@ -69,20 +76,22 @@ export default function TileCard({ tile }: TileCardProps) {
             </div>
           )}
 
-          {tile.externalLinks && (tile.externalLinks as string[]).length > 0 && (
+          {externalLinks.length > 0 && (
             <div className="flex items-center gap-2">
               <LinkIcon className="h-4 w-4" />
-              {(tile.externalLinks as string[]).map((link, index) => (
-                <a
-                  key={index}
-                  href={link}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm text-primary hover:underline"
-                >
-                  Resource {index + 1}
-                </a>
-              ))}
+              <div className="flex flex-wrap gap-2">
+                {externalLinks.map((link: string, index: number) => (
+                  <a
+                    key={index}
+                    href={link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-primary hover:underline"
+                  >
+                    Resource {index + 1}
+                  </a>
+                ))}
+              </div>
             </div>
           )}
         </div>
