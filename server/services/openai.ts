@@ -40,8 +40,8 @@ async function retryOperation<T>(
 ): Promise<T> {
   try {
     return await operation();
-  } catch (error) {
-    if (retries === 0 || !(error instanceof Error)) {
+  } catch (error: any) {
+    if (retries === 0) {
       if (error.message?.includes("429")) {
         throw new Error("OpenAI API quota exceeded. Please try again later.");
       }
@@ -51,7 +51,7 @@ async function retryOperation<T>(
       throw error;
     }
 
-    const backoff = error.message.includes("Rate limit reached") ? delay * 2 : delay;
+    const backoff = error.message?.includes("Rate limit reached") ? delay * 2 : delay;
     await new Promise(resolve => setTimeout(resolve, backoff));
     return retryOperation(operation, retries - 1, backoff);
   }
@@ -68,27 +68,23 @@ async function manageQuota(userId: number, tokenCount: number) {
     .limit(1);
 
   if (!userQuota || new Date(userQuota.resetAt) < today) {
+    // Insert new quota or reset existing one
     await db.insert(apiQuota).values({
       userId,
       tokenCount,
       callCount: 1,
       quotaLimit: 100000,
       resetAt: resetDate,
-    }).onConflictDoUpdate({
-      target: apiQuota.userId,
-      set: {
-        tokenCount,
-        callCount: 1,
-        resetAt: resetDate,
-        updatedAt: new Date()
-      },
     });
   } else {
-    await db.update(apiQuota).set({
-      tokenCount: userQuota.tokenCount + tokenCount,
-      callCount: userQuota.callCount + 1,
-      updatedAt: new Date()
-    }).where(eq(apiQuota.userId, userId));
+    // Update existing quota
+    await db.update(apiQuota)
+      .set({
+        tokenCount: userQuota.tokenCount + tokenCount,
+        callCount: userQuota.callCount + 1,
+        updatedAt: new Date()
+      })
+      .where(eq(apiQuota.userId, userId));
   }
 }
 
@@ -128,6 +124,29 @@ async function processChunks(chunks: string[], userId: number, level: string): P
     summary: summaries.map(s => s.summary).join("\n").trim(),
     explanation: summaries.map(s => s.explanation).join("\n\n").trim()
   };
+}
+
+export async function getQuotaInfo(userId: number) {
+  const [quota] = await db
+    .select()
+    .from(apiQuota)
+    .where(eq(apiQuota.userId, userId))
+    .limit(1);
+
+  if (!quota) {
+    return {
+      tokenCount: 0,
+      callCount: 0,
+      quotaLimit: 100000,
+      resetAt: new Date(
+        new Date().getFullYear(),
+        new Date().getMonth() + 1,
+        1
+      ),
+    };
+  }
+
+  return quota;
 }
 
 export async function summarizeContent(content: string, level: string = 'high_school', userId: number, fileId: number): Promise<AnalysisResult> {
@@ -170,9 +189,11 @@ export async function getStoredSummary(fileId: number): Promise<FileSummary | nu
 }
 
 interface FileSummary {
+  id: number;
   fileId: number;
   summary: string;
   explanation: string;
   educationLevel: string;
   createdAt: Date;
+  updatedAt: Date;
 }

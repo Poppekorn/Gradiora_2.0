@@ -1,7 +1,8 @@
-import { pgTable, text, serial, integer, boolean, timestamp, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, jsonb, unique } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { relations } from "drizzle-orm";
 
+// Base tables
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
   username: text("username").unique().notNull(),
@@ -62,7 +63,6 @@ export const tiles = pgTable("tiles", {
   color: text("color").default("#E2E8F0"),
 });
 
-// New tables for file management
 export const files = pgTable("files", {
   id: serial("id").primaryKey(),
   filename: text("filename").notNull(),
@@ -82,6 +82,7 @@ export const tags = pgTable("tags", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// Junction tables and tables with unique constraints
 export const fileTags = pgTable("file_tags", {
   id: serial("id").primaryKey(),
   fileId: integer("file_id").references(() => files.id).notNull(),
@@ -89,34 +90,19 @@ export const fileTags = pgTable("file_tags", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-// New table for API quota tracking
 export const apiQuota = pgTable("api_quota", {
   id: serial("id").primaryKey(),
-  userId: integer("user_id").references(() => users.id).notNull().unique(),
+  userId: integer("user_id").references(() => users.id).notNull(),
   tokenCount: integer("token_count").notNull().default(0),
   callCount: integer("call_count").notNull().default(0),
-  quotaLimit: integer("quota_limit").notNull().default(100000), // Default monthly limit
+  quotaLimit: integer("quota_limit").notNull().default(100000),
   resetAt: timestamp("reset_at").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-});
-
-// Add relations for apiQuota
-export const apiQuotaRelations = relations(apiQuota, ({ one }) => ({
-  user: one(users, {
-    fields: [apiQuota.userId],
-    references: [users.id],
-  }),
+}, (table) => ({
+  userIdUnique: unique("user_id_unique").on(table.userId),
 }));
 
-// Create schemas for the new table
-export const insertApiQuotaSchema = createInsertSchema(apiQuota);
-export const selectApiQuotaSchema = createSelectSchema(apiQuota);
-export type ApiQuota = typeof apiQuota.$inferSelect;
-export type NewApiQuota = typeof apiQuota.$inferInsert;
-
-
-// New table for file summaries
 export const fileSummaries = pgTable("file_summaries", {
   id: serial("id").primaryKey(),
   fileId: integer("file_id").references(() => files.id).notNull(),
@@ -125,37 +111,18 @@ export const fileSummaries = pgTable("file_summaries", {
   educationLevel: text("education_level").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-});
-
-// Add relations for fileSummaries
-export const fileSummariesRelations = relations(fileSummaries, ({ one }) => ({
-  file: one(files, {
-    fields: [fileSummaries.fileId],
-    references: [files.id],
-  }),
+}, (table) => ({
+  fileEducationUnique: unique("file_education_unique").on(table.fileId, table.educationLevel),
 }));
-
-// Add to files relations
-export const filesRelations = relations(files, ({ many, one }) => ({
-  tags: many(fileTags),
-  summaries: many(fileSummaries),
-  board: one(boards, {
-    fields: [files.boardId],
-    references: [boards.id],
-  }),
-  uploader: one(users, {
-    fields: [files.uploadedBy],
-    references: [users.id],
-  }),
-}));
-
-// Create schemas for the new table
-export const insertFileSummarySchema = createInsertSchema(fileSummaries);
-export const selectFileSummarySchema = createSelectSchema(fileSummaries);
-export type FileSummary = typeof fileSummaries.$inferSelect;
-export type NewFileSummary = typeof fileSummaries.$inferInsert;
 
 // Relations
+export const usersRelations = relations(users, ({ one }) => ({
+  organization: one(organizations, {
+    fields: [users.organizationId],
+    references: [organizations.id],
+  }),
+}));
+
 export const organizationsRelations = relations(organizations, ({ many }) => ({
   users: many(users),
   boards: many(boards),
@@ -210,42 +177,62 @@ export const fileTagsRelations = relations(fileTags, ({ one }) => ({
   }),
 }));
 
-// Schema validation and type exports
-export const insertUserSchema = createInsertSchema(users);
-export const selectUserSchema = createSelectSchema(users);
+// Types and Schemas
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 
-export const insertOrganizationSchema = createInsertSchema(organizations);
-export const selectOrganizationSchema = createSelectSchema(organizations);
 export type Organization = typeof organizations.$inferSelect;
 export type NewOrganization = typeof organizations.$inferInsert;
 
-export const insertBoardSchema = createInsertSchema(boards);
-export const selectBoardSchema = createSelectSchema(boards);
 export type Board = typeof boards.$inferSelect;
 export type NewBoard = typeof boards.$inferInsert;
 
-export const insertTileSchema = createInsertSchema(tiles);
-export const selectTileSchema = createSelectSchema(tiles);
 export type Tile = typeof tiles.$inferSelect;
 export type NewTile = typeof tiles.$inferInsert;
 
-export const insertFileSchema = createInsertSchema(files);
-export const selectFileSchema = createSelectSchema(files);
 export type File = typeof files.$inferSelect;
 export type NewFile = typeof files.$inferInsert;
 
-export const insertTagSchema = createInsertSchema(tags);
-export const selectTagSchema = createSelectSchema(tags);
 export type Tag = typeof tags.$inferSelect;
 export type NewTag = typeof tags.$inferInsert;
 
-export const insertFileTagSchema = createInsertSchema(fileTags);
-export const selectFileTagSchema = createSelectSchema(fileTags);
 export type FileTag = typeof fileTags.$inferSelect;
 export type NewFileTag = typeof fileTags.$inferInsert;
 
-// Aliases for backward compatibility
+export type ApiQuota = typeof apiQuota.$inferSelect;
+export type NewApiQuota = typeof apiQuota.$inferInsert;
+
+export type FileSummary = typeof fileSummaries.$inferSelect;
+export type NewFileSummary = typeof fileSummaries.$inferInsert;
+
+// Validation Schemas
+export const insertUserSchema = createInsertSchema(users);
+export const selectUserSchema = createSelectSchema(users);
+
+export const insertOrganizationSchema = createInsertSchema(organizations);
+export const selectOrganizationSchema = createSelectSchema(organizations);
+
+export const insertBoardSchema = createInsertSchema(boards);
+export const selectBoardSchema = createSelectSchema(boards);
+
+export const insertTileSchema = createInsertSchema(tiles);
+export const selectTileSchema = createSelectSchema(tiles);
+
+export const insertFileSchema = createInsertSchema(files);
+export const selectFileSchema = createSelectSchema(files);
+
+export const insertTagSchema = createInsertSchema(tags);
+export const selectTagSchema = createSelectSchema(tags);
+
+export const insertFileTagSchema = createInsertSchema(fileTags);
+export const selectFileTagSchema = createSelectSchema(fileTags);
+
+export const insertApiQuotaSchema = createInsertSchema(apiQuota);
+export const selectApiQuotaSchema = createSelectSchema(apiQuota);
+
+export const insertFileSummarySchema = createInsertSchema(fileSummaries);
+export const selectFileSummarySchema = createSelectSchema(fileSummaries);
+
+// Backward compatibility aliases
 export type InsertUser = NewUser;
 export type SelectUser = User;
