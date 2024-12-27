@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
 import type { Tile } from "@db/schema";
+import { useBoards } from "@/hooks/use-boards";
 
 interface EditTileDialogProps {
   tile: Tile;
@@ -31,7 +32,12 @@ interface EditTileDialogProps {
 export default function EditTileDialog({ tile, open, onOpenChange }: EditTileDialogProps) {
   const [loading, setLoading] = useState(false);
   const { updateTile } = useTiles(tile.boardId!); // Assert boardId is non-null
+  const { boards } = useBoards();
   const { toast } = useToast();
+
+  // Get parent board's color
+  const parentBoard = boards?.find(board => board.id === tile.boardId);
+  const parentColor = parentBoard?.color || "#E2E8F0";
 
   const [formData, setFormData] = useState({
     title: tile.title,
@@ -42,7 +48,6 @@ export default function EditTileDialog({ tile, open, onOpenChange }: EditTileDia
     tags: tile.tags || [],
     notes: tile.notes || "",
     grade: tile.grade || "",
-    color: tile.color || "#E2E8F0",
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -54,6 +59,7 @@ export default function EditTileDialog({ tile, open, onOpenChange }: EditTileDia
         ...tile,
         ...formData,
         dueDate: formData.dueDate ? new Date(formData.dueDate) : null,
+        color: parentColor, // Always use parent board's color
       });
       toast({
         title: "Success",
@@ -178,26 +184,6 @@ export default function EditTileDialog({ tile, open, onOpenChange }: EditTileDia
               onChange={(e) => setFormData(prev => ({ ...prev, grade: e.target.value }))}
               placeholder="A+, 95%, etc."
             />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="color">Color</Label>
-            <div className="flex gap-2">
-              <Input
-                id="color"
-                type="color"
-                value={formData.color}
-                onChange={(e) => setFormData(prev => ({ ...prev, color: e.target.value }))}
-                className="w-16 p-1 h-10"
-              />
-              <Input
-                type="text"
-                value={formData.color}
-                onChange={(e) => setFormData(prev => ({ ...prev, color: e.target.value }))}
-                placeholder="#E2E8F0"
-                className="font-mono"
-              />
-            </div>
           </div>
 
           <div className="flex justify-end gap-2">
