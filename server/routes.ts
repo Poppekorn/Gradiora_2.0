@@ -239,7 +239,7 @@ export function registerRoutes(app: Express): Server {
         educationLevel,
       });
 
-      const summary = await summarizeContent(content, educationLevel);
+      const summary = await summarizeContent(content, educationLevel, req.user!.id);
 
       Logger.info("File summarized successfully", {
         fileId: req.params.fileId,
@@ -1044,7 +1044,7 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  // Summarize endpoint
+  // Summarize endpoint (Corrected version from edited snippet)
   app.post("/api/boards/:boardId/files/:fileId/summarize", async (req, res) => {
     if (!req.isAuthenticated()) {
       return res.status(401).send("Not authenticated");
@@ -1082,7 +1082,7 @@ export function registerRoutes(app: Express): Server {
         educationLevel,
       });
 
-      const summary = await summarizeContent(content, educationLevel);
+      const summary = await summarizeContent(content, educationLevel, req.user!.id);
 
       Logger.info("File summarized successfully", {
         fileId: req.params.fileId,
