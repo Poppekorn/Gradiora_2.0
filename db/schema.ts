@@ -92,7 +92,7 @@ export const fileTags = pgTable("file_tags", {
 // New table for API quota tracking
 export const apiQuota = pgTable("api_quota", {
   id: serial("id").primaryKey(),
-  userId: integer("user_id").references(() => users.id).notNull(),
+  userId: integer("user_id").references(() => users.id).notNull().unique(),
   tokenCount: integer("token_count").notNull().default(0),
   callCount: integer("call_count").notNull().default(0),
   quotaLimit: integer("quota_limit").notNull().default(100000), // Default monthly limit

@@ -75,13 +75,19 @@ async function manageQuota(userId: number, tokenCount: number) {
       quotaLimit: 100000,
       resetAt: resetDate,
     }).onConflictDoUpdate({
-      target: [apiQuota.userId],
-      set: { tokenCount, callCount: 1, resetAt: resetDate },
+      target: apiQuota.userId,
+      set: { 
+        tokenCount,
+        callCount: 1,
+        resetAt: resetDate,
+        updatedAt: new Date()
+      },
     });
   } else {
     await db.update(apiQuota).set({
       tokenCount: userQuota.tokenCount + tokenCount,
       callCount: userQuota.callCount + 1,
+      updatedAt: new Date()
     }).where(eq(apiQuota.userId, userId));
   }
 }
