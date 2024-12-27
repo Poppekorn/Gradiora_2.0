@@ -3,6 +3,8 @@ import Logger from "../utils/logger";
 import { db } from "@db";
 import { apiQuota, fileSummaries } from "@db/schema";
 import { eq, desc } from "drizzle-orm";
+import fs from "fs/promises";
+import path from "path";
 
 if (!process.env.OPENAI_API_KEY) {
   throw new Error("OPENAI_API_KEY environment variable is not set");
@@ -13,6 +15,45 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 interface AnalysisResult {
   summary: string;
   explanation: string;
+}
+
+async function extractTextFromImage(imagePath: string): Promise<string> {
+  try {
+    // Read the image file as base64
+    const imageBuffer = await fs.readFile(imagePath);
+    const base64Image = imageBuffer.toString('base64');
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4-vision-preview",
+      messages: [
+        {
+          role: "system",
+          content: "You are a precise document transcriber. Extract and return all text content from the image, preserving the original structure and formatting where possible. Focus only on the text content, not on describing the image."
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "Please extract all text content from this image:"
+            },
+            {
+              type: "image_url",
+              image_url: {
+                url: `data:image/jpeg;base64,${base64Image}`
+              }
+            }
+          ],
+        }
+      ],
+      max_tokens: 1000,
+    });
+
+    return response.choices[0].message.content || '';
+  } catch (error) {
+    Logger.error("Error extracting text from image:", error);
+    throw new Error("Failed to extract text from image");
+  }
 }
 
 function chunkText(text: string, maxChunkSize: number = 3000): string[] {
@@ -31,30 +72,6 @@ function chunkText(text: string, maxChunkSize: number = 3000): string[] {
 
   if (currentChunk) chunks.push(currentChunk.trim());
   return chunks;
-}
-
-async function retryOperation<T>(
-  operation: () => Promise<T>,
-  retries = 3,
-  delay = 1000
-): Promise<T> {
-  try {
-    return await operation();
-  } catch (error: any) {
-    if (retries === 0) {
-      if (error.message?.includes("429")) {
-        throw new Error("OpenAI API quota exceeded. Please try again later.");
-      }
-      if (error.message?.includes("401")) {
-        throw new Error("Invalid API key. Please check your OpenAI API configuration.");
-      }
-      throw error;
-    }
-
-    const backoff = error.message?.includes("Rate limit reached") ? delay * 2 : delay;
-    await new Promise(resolve => setTimeout(resolve, backoff));
-    return retryOperation(operation, retries - 1, backoff);
-  }
 }
 
 async function manageQuota(userId: number, tokenCount: number) {
@@ -105,8 +122,8 @@ async function manageQuota(userId: number, tokenCount: number) {
 
 async function processChunks(chunks: string[], userId: number, level: string): Promise<AnalysisResult> {
   const summaries = await Promise.all(chunks.map(async (chunk) => {
-    const response = await retryOperation(() => openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
+    const response = await openai.chat.completions.create({
+      model: "gpt-4",
       messages: [
         {
           role: "system",
@@ -132,7 +149,7 @@ Do not:
       ],
       temperature: 0.3, // Lower temperature for more focused summaries
       max_tokens: 800
-    }));
+    });
 
     await manageQuota(userId, response.usage?.total_tokens || 0);
 
@@ -190,32 +207,53 @@ export async function getQuotaInfo(userId: number) {
   return quota;
 }
 
-export async function summarizeContent(content: string, level: string = 'high_school', userId: number, fileId: number): Promise<AnalysisResult> {
-  Logger.info("Summarizing content", { level, contentLength: content.length });
+export async function summarizeContent(content: string | Buffer, level: string = 'high_school', userId: number, fileId: number, mimeType?: string): Promise<AnalysisResult> {
+  Logger.info("Starting content summarization", { level, mimeType });
 
-  if (!content.trim()) {
-    throw new Error("Empty content provided for summarization");
+  let textContent: string;
+
+  try {
+    if (typeof content === 'string') {
+      textContent = content.trim();
+    } else {
+      // If it's an image file
+      const uploadDir = path.join(process.cwd(), 'uploads');
+      const tempImagePath = path.join(uploadDir, `temp_${fileId}.jpg`);
+      await fs.writeFile(tempImagePath, content);
+
+      textContent = await extractTextFromImage(tempImagePath);
+
+      // Clean up temp file
+      await fs.unlink(tempImagePath).catch(() => {});
+    }
+
+    if (!textContent) {
+      throw new Error("Empty content provided for summarization");
+    }
+
+    const chunks = chunkText(textContent);
+    Logger.info(`Content split into ${chunks.length} chunks`);
+
+    const result = await processChunks(chunks, userId, level);
+
+    // Store the summary in the database
+    await db.insert(fileSummaries).values({
+      fileId,
+      summary: result.summary,
+      explanation: result.explanation,
+      educationLevel: level,
+    });
+
+    Logger.info("Summarization completed", {
+      chunksProcessed: chunks.length,
+      totalLength: result.summary.length + result.explanation.length
+    });
+
+    return result;
+  } catch (error) {
+    Logger.error("Error in summarizeContent:", error);
+    throw error;
   }
-
-  const chunks = chunkText(content);
-  Logger.info(`Content split into ${chunks.length} chunks`);
-
-  const result = await processChunks(chunks, userId, level);
-
-  // Store the summary in the database
-  await db.insert(fileSummaries).values({
-    fileId,
-    summary: result.summary,
-    explanation: result.explanation,
-    educationLevel: level,
-  });
-
-  Logger.info("Summarization completed", {
-    chunksProcessed: chunks.length,
-    totalTokensUsed: result.summary.length + result.explanation.length
-  });
-
-  return result;
 }
 
 export async function getStoredSummary(fileId: number): Promise<FileSummary | null> {

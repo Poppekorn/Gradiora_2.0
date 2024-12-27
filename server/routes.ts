@@ -11,7 +11,7 @@ import fs from "fs";
 import { summarizeContent, getQuotaInfo, getStoredSummary } from "./services/openai";
 import { readFile } from "fs/promises";
 
-// Configure multer for file upload
+// Update the file upload configuration to handle images
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     const uploadDir = path.join(process.cwd(), 'uploads');
@@ -30,6 +30,23 @@ const upload = multer({
   storage: storage,
   limits: {
     fileSize: 50 * 1024 * 1024 // 50MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    // Accept text files and images
+    const allowedMimes = [
+      'text/plain',
+      'text/markdown',
+      'application/pdf',
+      'image/jpeg',
+      'image/png',
+      'image/webp'
+    ];
+
+    if (allowedMimes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Only text and image files are allowed.'));
+    }
   }
 });
 
@@ -201,7 +218,7 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  // Summarize endpoint (Corrected version from edited snippet)
+  // Updated summarize endpoint
   app.post("/api/boards/:boardId/files/:fileId/summarize", async (req, res) => {
     if (!req.isAuthenticated()) {
       return res.status(401).send("Not authenticated");
@@ -229,17 +246,22 @@ export function registerRoutes(app: Express): Server {
       }
 
       const filePath = path.join(process.cwd(), 'uploads', file.filename);
-      const content = await readFile(filePath, 'utf-8');
-
+      const content = await readFile(filePath);
       const educationLevel = req.body.educationLevel || 'high_school';
 
       Logger.info("Summarizing file content", {
         fileId: req.params.fileId,
-        contentLength: content.length,
+        mimeType: file.mimeType,
         educationLevel,
       });
 
-      const summary = await summarizeContent(content, educationLevel, req.user!.id, parseInt(req.params.fileId));
+      const summary = await summarizeContent(
+        content,
+        educationLevel,
+        req.user!.id,
+        parseInt(req.params.fileId),
+        file.mimeType
+      );
 
       Logger.info("File summarized successfully", {
         fileId: req.params.fileId,
@@ -838,80 +860,7 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  // File management routes
-  app.post("/api/boards/:boardId/files", upload.single('file'), async (req, res) => {
-    if (!req.isAuthenticated()) {
-      Logger.warn("Unauthorized file upload attempt", {
-        ip: req.ip,
-        headers: req.headers,
-        boardId: req.params.boardId,
-      });
-      return res.status(401).send("Not authenticated");
-    }
-
-    try {
-      if (!req.file) {
-        return res.status(400).send("No file uploaded");
-      }
-
-      const selectedTags = JSON.parse(req.body.tags || '[]');
-
-      // Create file record
-      const [fileRecord] = await db
-        .insert(files)
-        .values({
-          filename: req.file.filename,
-          originalName: req.file.originalname,
-          mimeType: req.file.mimetype,
-          size: req.file.size,
-          boardId: parseInt(req.params.boardId),
-          uploadedBy: req.user!.id,
-        })
-        .returning();
-
-      // Add tags to file
-      for (const tagId of selectedTags) {
-        await db
-          .insert(fileTags)
-          .values({
-            fileId: fileRecord.id,
-            tagId: tagId,
-          });
-      }
-
-      res.json(fileRecord);
-    } catch (error) {
-      res.status(500).send("Failed to upload file");
-    }
-  });
-
-  app.get("/api/boards/:boardId/files", async (req, res) => {
-    if (!req.isAuthenticated()) {
-      Logger.warn("Unauthorized files access attempt", {
-        ip: req.ip,
-        headers: req.headers,
-        boardId: req.params.boardId,
-      });
-      return res.status(401).send("Not authenticated");
-    }
-
-    try {
-      const boardFiles = await db.query.files.findMany({
-        where: eq(files.boardId, parseInt(req.params.boardId)),
-        with: {
-          tags: {
-            with: {
-              tag: true,
-            },
-          },
-        },
-      });
-
-      res.json(boardFiles);
-    } catch (error) {
-      res.status(500).send("Failed to fetch files");
-    }
-  });
+  // File management routes (This section is duplicated in the original code, so I'm removing the duplicate.)
 
 
   // Add tag to file endpoint
@@ -1025,7 +974,7 @@ export function registerRoutes(app: Express): Server {
         userId: req.user?.id,
       });
       res.json({ message: "Tag removed successfully" });
-    } catch (error) {
+    } catch(error) {
       Logger.error("Error removing tag from file", error as Error, {
         userId: req.user?.id,
         boardId: req.params.boardId,
