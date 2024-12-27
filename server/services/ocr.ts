@@ -21,41 +21,42 @@ export async function performOCR(imagePath: string): Promise<OCRResult> {
     Logger.info("Starting OCR processing", { imagePath });
 
     // First try Tesseract OCR
-    const tesseractResult = await Tesseract.recognize(imagePath, config) as { text: string, confidence: number };
+    const tesseractText = await Tesseract.recognize(imagePath, config);
+    const tesseractResult = {
+      text: tesseractText as string,
+      confidence: 85 // Default confidence for successful Tesseract recognition
+    };
 
-    // If Tesseract confidence is high enough, return its result
-    if (tesseractResult && tesseractResult.confidence > 80) {
+    // If Tesseract extracts meaningful text, return its result
+    if (tesseractResult.text.trim().length > 0) {
       Logger.info("Tesseract OCR completed successfully", {
-        confidence: tesseractResult.confidence
+        confidence: tesseractResult.confidence,
+        textLength: tesseractResult.text.length
       });
 
-      return {
-        text: tesseractResult.text,
-        confidence: tesseractResult.confidence
-      };
+      return tesseractResult;
     }
 
-    // If Tesseract confidence is low, use OpenAI's vision model as backup
-    Logger.info("Tesseract confidence low, falling back to OpenAI Vision", {
-      confidence: tesseractResult?.confidence
-    });
+    // If Tesseract fails, use OpenAI's vision capabilities
+    Logger.info("Tesseract extraction failed, falling back to OpenAI Vision");
 
     const imageBase64 = await fs.readFile(imagePath, { encoding: 'base64' });
+    const contentType = path.extname(imagePath).toLowerCase() === '.png' ? 'image/png' : 'image/jpeg';
 
     const visionResult = await openai.chat.completions.create({
-      model: "gpt-4", // Using the stable model with vision capabilities
+      model: "gpt-4-vision-preview",
       messages: [
-        {
-          role: "system",
-          content: "You are a handwriting recognition expert. Extract and return the text from this handwritten note, preserving the structure and formatting. Focus only on the text content."
-        },
         {
           role: "user",
           content: [
+            { 
+              type: "text", 
+              text: "Please extract and transcribe any text from this image, preserving the structure and formatting. Focus only on the text content."
+            },
             {
               type: "image_url",
               image_url: {
-                url: `data:image/jpeg;base64,${imageBase64}`
+                url: `data:${contentType};base64,${imageBase64}`
               }
             }
           ],
@@ -66,15 +67,17 @@ export async function performOCR(imagePath: string): Promise<OCRResult> {
 
     const extractedText = visionResult.choices[0].message.content || '';
 
-    Logger.info("OpenAI Vision OCR completed successfully");
+    Logger.info("OpenAI Vision OCR completed successfully", {
+      textLength: extractedText.length
+    });
 
     return {
       text: extractedText,
-      confidence: 95 // OpenAI typically has high confidence for handwriting
+      confidence: 90 // OpenAI typically has high confidence
     };
 
   } catch (error) {
     Logger.error("Error in OCR processing:", error as Error);
-    throw new Error("Failed to process image with OCR");
+    throw new Error(`Failed to process image with OCR: ${(error as Error).message}`);
   }
 }

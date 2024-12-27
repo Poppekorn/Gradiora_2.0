@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { setupAuth } from "./auth";
 import { db } from "@db";
-import { boards, tiles, files, tags, fileTags } from "@db/schema";
+import { boards, tiles, files, tags, fileTags, fileSummaries } from "@db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import Logger from "./utils/logger";
 import multer from "multer";
@@ -818,12 +818,27 @@ export function registerRoutes(app: Express): Server {
     }
 
     try {
-      // First delete file tags
+      // First delete file summaries
+      await db
+        .delete(fileSummaries)
+        .where(eq(fileSummaries.fileId, parseInt(req.params.fileId)));
+
+      Logger.info("File summaries deleted", {
+        fileId: req.params.fileId,
+        boardId: req.params.boardId,
+      });
+
+      // Then delete file tags
       await db
         .delete(fileTags)
         .where(eq(fileTags.fileId, parseInt(req.params.fileId)));
 
-      // Then delete the file record
+      Logger.info("File tags deleted", {
+        fileId: req.params.fileId,
+        boardId: req.params.boardId,
+      });
+
+      // Finally delete the file record
       const [deletedFile] = await db
         .delete(files)
         .where(eq(files.id, parseInt(req.params.fileId)))
@@ -859,9 +874,6 @@ export function registerRoutes(app: Express): Server {
       res.status(500).send("Failed to delete file");
     }
   });
-
-  // File management routes (This section is duplicated in the original code, so I'm removing the duplicate.)
-
 
   // Add tag to file endpoint
   app.post("/api/boards/:boardId/files/:fileId/tags/:tagId", async (req, res) => {
