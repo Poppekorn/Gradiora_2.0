@@ -25,16 +25,16 @@ interface QuizResult {
   questions: QuizQuestion[];
 }
 
-export async function analyzeContent(content: string): Promise<AnalysisResult> {
+export async function analyzeContent(content: string, level: string = 'high'): Promise<AnalysisResult> {
   try {
-    Logger.info("Analyzing content with OpenAI");
-    
+    Logger.info("Analyzing content with OpenAI", { level });
+
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
         {
           role: "system",
-          content: "You are an expert study assistant. Analyze the provided content and return a JSON object containing a concise summary and detailed explanation. Format: { 'summary': string, 'explanation': string }"
+          content: `You are an expert study assistant. Analyze the provided content and return a JSON object containing a concise summary and detailed explanation, tailored for a ${level} school level audience. Format: { 'summary': string, 'explanation': string }`
         },
         {
           role: "user",
@@ -52,16 +52,16 @@ export async function analyzeContent(content: string): Promise<AnalysisResult> {
   }
 }
 
-export async function generateQuiz(content: string): Promise<QuizResult> {
+export async function generateQuiz(content: string, level: string = 'high'): Promise<QuizResult> {
   try {
-    Logger.info("Generating quiz with OpenAI");
-    
+    Logger.info("Generating quiz with OpenAI", { level });
+
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
         {
           role: "system",
-          content: `You are an expert quiz generator. Create a quiz based on the provided content.
+          content: `You are an expert quiz generator. Create a quiz based on the provided content, tailored for a ${level} school level audience.
           Return a JSON object with the following format:
           {
             'topic': string, // Main topic of the content
@@ -92,18 +92,18 @@ export async function generateQuiz(content: string): Promise<QuizResult> {
   }
 }
 
-export async function analyzeMultipleContents(contents: string[]): Promise<AnalysisResult> {
+export async function analyzeMultipleContents(contents: string[], level: string = 'high'): Promise<AnalysisResult> {
   try {
-    Logger.info("Analyzing multiple contents with OpenAI");
-    
+    Logger.info("Analyzing multiple contents with OpenAI", { level });
+
     const combinedContent = contents.join("\n\n=== Next Document ===\n\n");
-    
+
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
         {
           role: "system",
-          content: "You are an expert study assistant. Analyze the provided multiple documents and return a JSON object containing a unified summary and detailed explanation that connects the key concepts across all documents. Format: { 'summary': string, 'explanation': string }"
+          content: `You are an expert study assistant. Analyze the provided multiple documents and return a JSON object containing a unified summary and detailed explanation that connects the key concepts across all documents, tailored for a ${level} school level audience. Format: { 'summary': string, 'explanation': string }`
         },
         {
           role: "user",

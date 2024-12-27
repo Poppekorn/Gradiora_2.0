@@ -1034,6 +1034,8 @@ export function registerRoutes(app: Express): Server {
     }
 
     try {
+      const level = req.query.level || 'high'; // Default to high school level if not specified
+
       // Get the study unit (tile)
       const [tile] = await db
         .select()
@@ -1082,8 +1084,8 @@ export function registerRoutes(app: Express): Server {
         })
       );
 
-      // Get combined analysis
-      const analysis = await analyzeMultipleContents(contents);
+      // Get combined analysis with specified education level
+      const analysis = await analyzeMultipleContents(contents, level as string);
 
       // Update the tile with the analysis results
       await db
@@ -1095,6 +1097,7 @@ export function registerRoutes(app: Express): Server {
               summary: analysis.summary,
               explanation: analysis.explanation,
               analyzedAt: new Date().toISOString(),
+              level,
             }
           })
         })
@@ -1104,6 +1107,7 @@ export function registerRoutes(app: Express): Server {
         tileId: req.params.tileId,
         boardId: req.params.boardId,
         fileCount: studyUnitFiles.length,
+        level,
         userId: req.user?.id,
       });
 
@@ -1131,6 +1135,8 @@ export function registerRoutes(app: Express): Server {
     }
 
     try {
+      const level = req.query.level || 'high'; // Default to high school level if not specified
+
       // Get the study unit (tile)
       const [tile] = await db
         .select()
@@ -1179,8 +1185,8 @@ export function registerRoutes(app: Express): Server {
         })
       );
 
-      // Generate quiz based on combined content
-      const quiz = await generateQuiz(contents.join('\n\n--- Next Document ---\n\n'));
+      // Generate quiz based on combined content and education level
+      const quiz = await generateQuiz(contents.join('\n\n--- Next Document ---\n\n'), level as string);
 
       // Store the quiz in the tile's notes
       await db
@@ -1191,6 +1197,7 @@ export function registerRoutes(app: Express): Server {
             aiQuiz: {
               ...quiz,
               generatedAt: new Date().toISOString(),
+              level,
             }
           })
         })
@@ -1200,6 +1207,7 @@ export function registerRoutes(app: Express): Server {
         tileId: req.params.tileId,
         boardId: req.params.boardId,
         fileCount: studyUnitFiles.length,
+        level,
         userId: req.user?.id,
       });
 

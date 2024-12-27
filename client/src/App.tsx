@@ -6,6 +6,7 @@ import { useUser } from "./hooks/use-user";
 import AuthPage from "./pages/AuthPage";
 import DashboardPage from "./pages/DashboardPage";
 import BoardPage from "./pages/BoardPage";
+import StudyUnitPage from "./pages/StudyUnitPage";
 import { Loader2 } from "lucide-react";
 
 function App() {
@@ -26,7 +27,8 @@ function App() {
   return (
     <Switch>
       <Route path="/" component={DashboardPage} />
-      <Route path="/board/:id" component={BoardPage} />
+      <Route path="/boards/:boardId" component={BoardPage} />
+      <Route path="/boards/:boardId/tiles/:tileId" component={StudyUnitPage} />
     </Switch>
   );
 }

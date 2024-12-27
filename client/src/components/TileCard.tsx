@@ -15,9 +15,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useState } from "react";
 import EditTileDialog from "./EditTileDialog";
 import { useBoards } from "@/hooks/use-boards";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { useMutation } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 
 interface BoardCardProps {
   tile: Tile;
@@ -54,11 +52,8 @@ const statusColors = {
 };
 
 export default function TileCard({ tile }: BoardCardProps) {
+  const [, setLocation] = useLocation();
   const [isEditOpen, setIsEditOpen] = useState(false);
-  const [showAnalysisDialog, setShowAnalysisDialog] = useState(false);
-  const [showQuizDialog, setShowQuizDialog] = useState(false);
-  const [analysisResult, setAnalysisResult] = useState<AIAnalysisResult | null>(null);
-  const [quizResult, setQuizResult] = useState<QuizResult | null>(null);
   const { deleteTile } = useTiles(tile.boardId!);
   const { boards } = useBoards();
   const { toast } = useToast();
@@ -66,56 +61,6 @@ export default function TileCard({ tile }: BoardCardProps) {
   // Get parent board's color
   const parentBoard = boards?.find(board => board.id === tile.boardId);
   const parentColor = parentBoard?.color || "#E2E8F0";
-
-  const analyzeMutation = useMutation({
-    mutationFn: async () => {
-      const response = await fetch(`/api/boards/${tile.boardId}/tiles/${tile.id}/analyze`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-      if (!response.ok) throw new Error(await response.text());
-      return response.json();
-    },
-  });
-
-  const quizMutation = useMutation({
-    mutationFn: async () => {
-      const response = await fetch(`/api/boards/${tile.boardId}/tiles/${tile.id}/quiz`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-      if (!response.ok) throw new Error(await response.text());
-      return response.json();
-    },
-  });
-
-  const handleAnalyze = async () => {
-    try {
-      const result = await analyzeMutation.mutateAsync();
-      setAnalysisResult(result);
-      setShowAnalysisDialog(true);
-    } catch (error) {
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description: "Failed to analyze study unit content",
-      });
-    }
-  };
-
-  const handleGenerateQuiz = async () => {
-    try {
-      const result = await quizMutation.mutateAsync();
-      setQuizResult(result);
-      setShowQuizDialog(true);
-    } catch (error) {
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description: "Failed to generate quiz",
-      });
-    }
-  };
 
   const handleDelete = async () => {
     try {
@@ -147,6 +92,8 @@ export default function TileCard({ tile }: BoardCardProps) {
           backgroundColor: parentColor,
           borderColor: parentColor ? `hsl(from ${parentColor} h s calc(l - 10%))` : undefined
         }}
+        className="hover:shadow-lg transition-shadow cursor-pointer"
+        onClick={() => setLocation(`/boards/${tile.boardId}/tiles/${tile.id}`)}
       >
         <CardHeader>
           <div className="flex justify-between items-start gap-4">
@@ -170,11 +117,11 @@ export default function TileCard({ tile }: BoardCardProps) {
                     <Edit className="mr-2 h-4 w-4" />
                     Edit
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={handleAnalyze} disabled={analyzeMutation.isPending}>
+                  <DropdownMenuItem onClick={() => {}} disabled>
                     <Brain className="mr-2 h-4 w-4" />
                     Analyze Content
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={handleGenerateQuiz} disabled={quizMutation.isPending}>
+                  <DropdownMenuItem onClick={() => {}} disabled>
                     <GraduationCap className="mr-2 h-4 w-4" />
                     Generate Quiz
                   </DropdownMenuItem>
@@ -271,65 +218,6 @@ export default function TileCard({ tile }: BoardCardProps) {
         open={isEditOpen}
         onOpenChange={setIsEditOpen}
       />
-
-      <Dialog open={showAnalysisDialog} onOpenChange={setShowAnalysisDialog}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>AI Analysis</DialogTitle>
-            <DialogDescription>
-              Analysis of content in study unit: {tile.title}
-            </DialogDescription>
-          </DialogHeader>
-          <ScrollArea className="max-h-[60vh]">
-            {analysisResult && (
-              <div className="space-y-6">
-                <div>
-                  <h3 className="text-lg font-semibold mb-2">Summary</h3>
-                  <p className="text-muted-foreground">{analysisResult.summary}</p>
-                </div>
-                <div>
-                  <h3 className="text-lg font-semibold mb-2">Detailed Explanation</h3>
-                  <p className="text-muted-foreground whitespace-pre-wrap">{analysisResult.explanation}</p>
-                </div>
-              </div>
-            )}
-          </ScrollArea>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={showQuizDialog} onOpenChange={setShowQuizDialog}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>Quiz</DialogTitle>
-            <DialogDescription>
-              Test your knowledge about {quizResult?.topic || tile.title}
-            </DialogDescription>
-          </DialogHeader>
-          <ScrollArea className="max-h-[60vh]">
-            {quizResult && (
-              <div className="space-y-8">
-                {quizResult.questions.map((q, i) => (
-                  <div key={i} className="space-y-4">
-                    <h3 className="font-semibold">Question {i + 1}: {q.question}</h3>
-                    <div className="space-y-2">
-                      {q.options.map((option, j) => (
-                        <div key={j} className="flex items-center gap-2">
-                          <div className={`p-2 rounded ${option === q.correctAnswer ? 'bg-green-100 dark:bg-green-900' : ''}`}>
-                            {option}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                      <span className="font-medium">Explanation:</span> {q.explanation}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </ScrollArea>
-        </DialogContent>
-      </Dialog>
     </>
   );
 }
