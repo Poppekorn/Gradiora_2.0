@@ -22,6 +22,27 @@ interface FileUploadProps {
   children: React.ReactNode;
 }
 
+const ALLOWED_FILE_TYPES = [
+  // Images
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+  // Documents
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation', // .pptx
+  'text/plain',
+  'text/csv',
+  // Archives
+  'application/zip',
+  'application/x-rar-compressed',
+];
+
 export default function FileUpload({ boardId, children }: FileUploadProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -34,7 +55,29 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      setSelectedFile(e.target.files[0]);
+      const file = e.target.files[0];
+
+      if (!ALLOWED_FILE_TYPES.includes(file.type)) {
+        toast({
+          variant: "destructive",
+          title: "Invalid file type",
+          description: "Please upload a valid document, image, or archive file.",
+        });
+        e.target.value = '';
+        return;
+      }
+
+      if (file.size > 50 * 1024 * 1024) { // 50MB limit
+        toast({
+          variant: "destructive",
+          title: "File too large",
+          description: "Please upload a file smaller than 50MB.",
+        });
+        e.target.value = '';
+        return;
+      }
+
+      setSelectedFile(file);
     }
   };
 
@@ -73,6 +116,20 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
   const ensureStudyUnitTags = async () => {
     if (!tiles) return;
 
+    // Create tag for the class itself
+    try {
+      const board = tiles[0]?.boardId;
+      if (board) {
+        await createTag({
+          name: `Class ${board}`,
+          isStudyUnitTag: false,
+        });
+      }
+    } catch (error) {
+      console.error("Failed to create class tag:", error);
+    }
+
+    // Create tags for each study unit
     for (const tile of tiles) {
       const tagExists = tags?.some(
         tag => tag.name === tile.title && tag.isStudyUnitTag
@@ -114,6 +171,7 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
           <DialogTitle>Upload File</DialogTitle>
           <DialogDescription>
             Upload a file and assign it to specific study units or add custom tags.
+            Supported formats: images, documents, and archives up to 50MB.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -123,13 +181,17 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
               id="file"
               type="file"
               onChange={handleFileChange}
+              accept={ALLOWED_FILE_TYPES.join(',')}
               required
             />
+            <p className="text-xs text-muted-foreground">
+              Maximum file size: 50MB
+            </p>
           </div>
 
           <div className="space-y-2">
             <Label>Tags</Label>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-2 border rounded-lg">
               {tags?.map((tag: Tag) => (
                 <Badge
                   key={tag.id}

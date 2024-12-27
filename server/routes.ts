@@ -2,10 +2,35 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { setupAuth } from "./auth";
 import { db } from "@db";
-import { boards, tiles } from "@db/schema";
+import { boards, tiles, files, tags, fileTags } from "@db/schema";
 import { eq } from "drizzle-orm";
 import { optimizeSchedule } from "./optimizer";
 import Logger from "./utils/logger";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
+
+// Configure multer for file upload
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadDir = path.join(process.cwd(), 'uploads');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({ 
+  storage: storage,
+  limits: {
+    fileSize: 50 * 1024 * 1024 // 50MB limit
+  }
+});
 
 export function registerRoutes(app: Express): Server {
   setupAuth(app);
@@ -448,6 +473,167 @@ export function registerRoutes(app: Express): Server {
         boardId: req.params.boardId,
       });
       res.status(500).send("Failed to optimize schedule");
+    }
+  });
+
+
+  // File management routes
+  app.post("/api/boards/:boardId/files", upload.single('file'), async (req, res) => {
+    if (!req.isAuthenticated()) {
+      Logger.warn("Unauthorized file upload attempt", {
+        ip: req.ip,
+        headers: req.headers,
+        boardId: req.params.boardId,
+      });
+      return res.status(401).send("Not authenticated");
+    }
+
+    try {
+      if (!req.file) {
+        return res.status(400).send("No file uploaded");
+      }
+
+      const selectedTags = JSON.parse(req.body.tags || '[]');
+
+      // Create file record
+      const [fileRecord] = await db
+        .insert(files)
+        .values({
+          filename: req.file.filename,
+          originalName: req.file.originalname,
+          mimeType: req.file.mimetype,
+          size: req.file.size,
+          boardId: parseInt(req.params.boardId),
+          uploadedBy: req.user!.id,
+        })
+        .returning();
+
+      // Add tags to file
+      for (const tagId of selectedTags) {
+        await db
+          .insert(fileTags)
+          .values({
+            fileId: fileRecord.id,
+            tagId: tagId,
+          });
+      }
+
+      Logger.info("File uploaded successfully", {
+        fileId: fileRecord.id,
+        boardId: req.params.boardId,
+        userId: req.user?.id,
+      });
+      res.json(fileRecord);
+    } catch (error) {
+      Logger.error("Error uploading file", error as Error, {
+        userId: req.user?.id,
+        boardId: req.params.boardId,
+      });
+      res.status(500).send("Failed to upload file");
+    }
+  });
+
+  app.get("/api/boards/:boardId/files", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      Logger.warn("Unauthorized files access attempt", {
+        ip: req.ip,
+        headers: req.headers,
+        boardId: req.params.boardId,
+      });
+      return res.status(401).send("Not authenticated");
+    }
+
+    try {
+      const boardFiles = await db.query.files.findMany({
+        where: eq(files.boardId, parseInt(req.params.boardId)),
+        with: {
+          tags: {
+            with: {
+              tag: true,
+            },
+          },
+        },
+      });
+
+      Logger.info("Files retrieved successfully", {
+        boardId: req.params.boardId,
+        count: boardFiles.length,
+        userId: req.user?.id,
+      });
+      res.json(boardFiles);
+    } catch (error) {
+      Logger.error("Error fetching files", error as Error, {
+        userId: req.user?.id,
+        boardId: req.params.boardId,
+      });
+      res.status(500).send("Failed to fetch files");
+    }
+  });
+
+  // Tag management routes
+  app.post("/api/boards/:boardId/tags", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      Logger.warn("Unauthorized tag creation attempt", {
+        ip: req.ip,
+        headers: req.headers,
+        boardId: req.params.boardId,
+      });
+      return res.status(401).send("Not authenticated");
+    }
+
+    try {
+      const [tag] = await db
+        .insert(tags)
+        .values({
+          name: req.body.name,
+          boardId: parseInt(req.params.boardId),
+          isStudyUnitTag: req.body.isStudyUnitTag || false,
+        })
+        .returning();
+
+      Logger.info("Tag created successfully", {
+        tagId: tag.id,
+        boardId: req.params.boardId,
+        userId: req.user?.id,
+      });
+      res.json(tag);
+    } catch (error) {
+      Logger.error("Error creating tag", error as Error, {
+        userId: req.user?.id,
+        boardId: req.params.boardId,
+        payload: req.body,
+      });
+      res.status(500).send("Failed to create tag");
+    }
+  });
+
+  app.get("/api/boards/:boardId/tags", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      Logger.warn("Unauthorized tags access attempt", {
+        ip: req.ip,
+        headers: req.headers,
+        boardId: req.params.boardId,
+      });
+      return res.status(401).send("Not authenticated");
+    }
+
+    try {
+      const boardTags = await db.query.tags.findMany({
+        where: eq(tags.boardId, parseInt(req.params.boardId)),
+      });
+
+      Logger.info("Tags retrieved successfully", {
+        boardId: req.params.boardId,
+        count: boardTags.length,
+        userId: req.user?.id,
+      });
+      res.json(boardTags);
+    } catch (error) {
+      Logger.error("Error fetching tags", error as Error, {
+        userId: req.user?.id,
+        boardId: req.params.boardId,
+      });
+      res.status(500).send("Failed to fetch tags");
     }
   });
 
