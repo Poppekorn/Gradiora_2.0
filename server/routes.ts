@@ -8,25 +8,27 @@ import Logger from "./utils/logger";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
-import { promises as fsPromises } from "fs";
 import { summarizeContent, getQuotaInfo, getStoredSummary } from "./services/openai";
 import { performOCR } from "./services/ocr";
 import { PDFDocument } from "pdf-lib";
 import mammoth from "mammoth";
 import sharp from "sharp";
 
-// Update file upload configuration
+// Ensure uploads directory exists
+const uploadDir = path.join(process.cwd(), 'uploads');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+// Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    const uploadDir = path.join(process.cwd(), 'uploads');
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
     cb(null, uploadDir);
   },
   filename: function (req, file, cb) {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
+    const ext = path.extname(file.originalname);
+    cb(null, uniqueSuffix + ext);
   }
 });
 
@@ -44,14 +46,21 @@ const upload = multer({
       'image/png': true,
       'image/webp': true,
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document': true,
-      'application/msword': true
+      'application/msword': true,
+      'application/x-msword': true
     };
 
-    // Handle common MIME type variations
+    // Normalize MIME type
     const normalizedMime = file.mimetype.toLowerCase();
+    Logger.info("File upload attempt", {
+      originalMime: file.mimetype,
+      normalizedMime,
+      filename: file.originalname
+    });
+
     if (allowedMimes[normalizedMime] || 
-        (normalizedMime.includes('word') || 
-         normalizedMime.includes('doc'))) {
+        normalizedMime.includes('word') || 
+        normalizedMime.includes('doc')) {
       cb(null, true);
     } else {
       cb(new Error(`Invalid file type. Allowed types are: ${Object.keys(allowedMimes).join(', ')}`));
@@ -73,14 +82,21 @@ async function extractTextFromDocument(filePath: string, mimeType: string): Prom
       return ocrResult.text;
     } 
     else if (mimeType.includes('word') || mimeType.includes('doc')) {
-      const result = await mammoth.extractRawText({ path: filePath });
-      Logger.info("Word document text extracted", {
-        textLength: result.value.length
-      });
-      return result.value;
+      try {
+        const result = await mammoth.extractRawText({ path: filePath });
+        Logger.info("Word document text extracted", {
+          textLength: result.value.length
+        });
+        return result.value;
+      } catch (docError) {
+        Logger.error("Error with mammoth extraction:", docError);
+        // Fallback for old .doc files
+        const content = await fs.promises.readFile(filePath, 'utf8');
+        return content;
+      }
     }
     else if (mimeType === 'text/plain' || mimeType === 'text/markdown') {
-      const content = await fsPromises.readFile(filePath, 'utf-8');
+      const content = await fs.promises.readFile(filePath, 'utf-8');
       return content;
     }
 
@@ -111,11 +127,13 @@ export function registerRoutes(app: Express): Server {
         return res.status(404).send("File not found");
       }
 
-      const filePath = path.join(process.cwd(), 'uploads', file.filename);
+      const filePath = path.join(uploadDir, file.filename);
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).send("File not found on disk");
+      }
 
       // Generate preview based on file type
       if (file.mimeType.startsWith('image/')) {
-        // For images, generate a thumbnail
         const thumbnail = await sharp(filePath)
           .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
           .toBuffer();
@@ -124,8 +142,7 @@ export function registerRoutes(app: Express): Server {
         return res.send(thumbnail);
       }
       else if (file.mimeType === 'application/pdf') {
-        // For PDFs, get metadata
-        const pdfBytes = await fsPromises.readFile(filePath);
+        const pdfBytes = await fs.promises.readFile(filePath);
         const pdfDoc = await PDFDocument.load(pdfBytes);
         const pages = pdfDoc.getPages();
 
@@ -137,7 +154,6 @@ export function registerRoutes(app: Express): Server {
       }
       else if (file.mimeType.includes('word') || file.mimeType.includes('doc')) {
         try {
-          // For Word documents, extract text preview
           const result = await mammoth.extractRawText({ path: filePath });
           const previewText = result.value.substring(0, 1000) + (result.value.length > 1000 ? '...' : '');
           return res.json({
@@ -148,13 +164,12 @@ export function registerRoutes(app: Express): Server {
             }
           });
         } catch (docError) {
-          Logger.error("Error extracting Word document text:", docError as Error);
+          Logger.error("Error extracting Word document text:", docError);
           return res.status(500).send("Failed to extract document content");
         }
       }
       else if (file.mimeType === 'text/plain' || file.mimeType === 'text/markdown') {
-        // For text files, return first 1000 characters
-        const content = await fsPromises.readFile(filePath, 'utf-8');
+        const content = await fs.promises.readFile(filePath, 'utf-8');
         const previewText = content.substring(0, 1000) + (content.length > 1000 ? '...' : '');
         return res.json({
           type: 'text',
@@ -167,24 +182,18 @@ export function registerRoutes(app: Express): Server {
 
       res.status(400).send("Preview not available for this file type");
     } catch (error) {
-      Logger.error("Error generating file preview:", error as Error);
+      Logger.error("Error generating file preview:", error);
       res.status(500).send("Failed to generate preview");
     }
   });
 
-  // Update file conversion endpoint to handle different file types
+  // File conversion endpoint
   app.post("/api/boards/:boardId/files/:fileId/convert", async (req, res) => {
     if (!req.isAuthenticated()) {
       return res.status(401).send("Not authenticated");
     }
 
     try {
-      Logger.info("Starting file conversion", {
-        boardId: req.params.boardId,
-        fileId: req.params.fileId,
-        userId: req.user?.id,
-      });
-
       const [file] = await db
         .select()
         .from(files)
@@ -195,7 +204,11 @@ export function registerRoutes(app: Express): Server {
         return res.status(404).send("File not found");
       }
 
-      const filePath = path.join(process.cwd(), 'uploads', file.filename);
+      const filePath = path.join(uploadDir, file.filename);
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).send("File not found on disk");
+      }
+
       const extractedText = await extractTextFromDocument(filePath, file.mimeType);
 
       // Store the extracted text
@@ -220,108 +233,8 @@ export function registerRoutes(app: Express): Server {
         textLength: extractedText.length
       });
     } catch (error) {
-      Logger.error("Error converting file", error as Error);
+      Logger.error("Error converting file:", error);
       res.status(500).send("Failed to convert file");
-    }
-  });
-
-  // Add quota endpoint
-  app.get("/api/quota", async (req, res) => {
-    if (!req.isAuthenticated()) {
-      return res.status(401).send("Not authenticated");
-    }
-
-    try {
-      const quota = await getQuotaInfo(req.user!.id);
-
-      if (!quota) {
-        // Return default values if no quota record exists
-        return res.json({
-          tokenCount: 0,
-          callCount: 0,
-          quotaLimit: 100000,
-          resetAt: new Date(
-            new Date().getFullYear(),
-            new Date().getMonth() + 1,
-            1
-          ).toISOString(),
-        });
-      }
-
-      res.json(quota);
-    } catch (error) {
-      Logger.error("Error fetching quota info", error as Error);
-      res.status(500).send("Failed to fetch quota information");
-    }
-  });
-
-  // Tag management routes
-  app.post("/api/boards/:boardId/tags", async (req, res) => {
-    if (!req.isAuthenticated()) {
-      Logger.warn("Unauthorized tag creation attempt", {
-        ip: req.ip,
-        headers: req.headers,
-        boardId: req.params.boardId,
-      });
-      return res.status(401).send("Not authenticated");
-    }
-
-    try {
-      const normalizedName = req.body.name.trim();
-      Logger.info("Attempting to create/find tag", {
-        boardId: req.params.boardId,
-        normalizedName,
-        userId: req.user?.id,
-      });
-
-      // Check for existing tag with normalized name comparison
-      const [existingTag] = await db
-        .select()
-        .from(tags)
-        .where(
-          and(
-            sql`lower(trim(${tags.name})) = lower(${normalizedName})`,
-            eq(tags.boardId, parseInt(req.params.boardId))
-          )
-        )
-        .limit(1);
-
-      if (existingTag) {
-        Logger.info("Returning existing tag", {
-          tagId: existingTag.id,
-          boardId: req.params.boardId,
-          userId: req.user?.id,
-        });
-        return res.json(existingTag);
-      }
-
-      const [tag] = await db
-        .insert(tags)
-        .values({
-          name: normalizedName,
-          boardId: parseInt(req.params.boardId),
-          isStudyUnitTag: req.body.isStudyUnitTag || false,
-        })
-        .returning();
-
-      Logger.info("Tag created successfully", {
-        tagId: tag.id,
-        boardId: req.params.boardId,
-        userId: req.user?.id,
-      });
-      res.json(tag);
-    } catch (error) {
-      Logger.error("Error creating tag", error as Error, {
-        userId: req.user?.id,
-        boardId: req.params.boardId,
-        payload: req.body,
-      });
-
-      if ((error as any)?.code === '23505') {
-        return res.status(409).send("A tag with this name already exists");
-      }
-
-      res.status(500).send("Failed to create tag");
     }
   });
 
@@ -361,7 +274,7 @@ export function registerRoutes(app: Express): Server {
 
       res.json(fileRecord);
     } catch (error) {
-      Logger.error("Error uploading file", error as Error);
+      Logger.error("Error uploading file:", error);
       res.status(500).send("Failed to upload file");
     }
   });
@@ -385,7 +298,7 @@ export function registerRoutes(app: Express): Server {
 
       res.json(boardFiles);
     } catch (error) {
-      Logger.error("Error fetching files", error as Error);
+      Logger.error("Error fetching files:", error);
       res.status(500).send("Failed to fetch files");
     }
   });
@@ -417,8 +330,11 @@ export function registerRoutes(app: Express): Server {
         return res.status(404).send("File not found");
       }
 
-      const filePath = path.join(process.cwd(), 'uploads', file.filename);
-      const content = await fsPromises.readFile(filePath);
+      const filePath = path.join(uploadDir, file.filename);
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).send("File not found on disk");
+      }
+      const content = await fs.promises.readFile(filePath);
       const educationLevel = req.body.educationLevel || 'high_school';
 
       Logger.info("Summarizing file content", {
@@ -444,7 +360,7 @@ export function registerRoutes(app: Express): Server {
 
       res.json(summary);
     } catch (error) {
-      Logger.error("Error summarizing file", error as Error, {
+      Logger.error("Error summarizing file:", error, {
         userId: req.user?.id,
         boardId: req.params.boardId,
         fileId: req.params.fileId,
@@ -487,11 +403,10 @@ export function registerRoutes(app: Express): Server {
 
       res.json(summary);
     } catch (error) {
-      Logger.error("Error fetching summary", error as Error);
+      Logger.error("Error fetching summary:", error);
       res.status(500).send("Failed to fetch summary");
     }
   });
-
 
   // Boards API
   app.get("/api/boards", async (req, res) => {
@@ -511,7 +426,7 @@ export function registerRoutes(app: Express): Server {
       });
       res.json(userBoards);
     } catch (error) {
-      Logger.error("Error fetching boards", error as Error, {
+      Logger.error("Error fetching boards:", error, {
         userId: req.user?.id,
       });
       res.status(500).send("Failed to fetch boards");
@@ -552,7 +467,7 @@ export function registerRoutes(app: Express): Server {
       });
       res.json(board);
     } catch (error) {
-      Logger.error("Error creating board", error as Error, {
+      Logger.error("Error creating board:", error, {
         userId: req.user?.id,
         payload: req.body,
       });
@@ -607,7 +522,7 @@ export function registerRoutes(app: Express): Server {
       });
       res.json(updatedBoard);
     } catch (error) {
-      Logger.error("Error updating board", error as Error, {
+      Logger.error("Error updating board:", error, {
         userId: req.user?.id,
         boardId: req.params.id,
         payload: req.body,
@@ -651,7 +566,7 @@ export function registerRoutes(app: Express): Server {
 
       // Delete physical files
       for (const file of deletedFiles) {
-        const filePath = path.join(process.cwd(), 'uploads', file.filename);
+        const filePath = path.join(uploadDir, file.filename);
         if (fs.existsSync(filePath)) {
           fs.unlinkSync(filePath);
         }
@@ -702,7 +617,7 @@ export function registerRoutes(app: Express): Server {
       });
       res.json({ message: "Board deleted successfully" });
     } catch (error) {
-      Logger.error("Error deleting board", error as Error, {
+      Logger.error("Error deleting board:", error, {
         userId: req.user?.id,
         boardId: req.params.id,
       });
@@ -733,7 +648,7 @@ export function registerRoutes(app: Express): Server {
       });
       res.json(boardTiles);
     } catch (error) {
-      Logger.error("Error fetching tiles", error as Error, {
+      Logger.error("Error fetching tiles:", error, {
         userId: req.user?.id,
         boardId: req.params.boardId,
       });
@@ -786,7 +701,7 @@ export function registerRoutes(app: Express): Server {
       });
       res.json(tile);
     } catch (error) {
-      Logger.error("Error creating tile", error as Error, {
+      Logger.error("Error creating tile:", error, {
         userId: req.user?.id,
         boardId: req.params.boardId,
         payload: req.body,
@@ -853,7 +768,7 @@ export function registerRoutes(app: Express): Server {
       });
       res.json(updatedTile);
     } catch (error) {
-      Logger.error("Error updating tile", error as Error, {
+      Logger.error("Error updating tile:", error, {
         userId: req.user?.id,
         boardId: req.params.boardId,
         tileId: req.params.id,
@@ -897,7 +812,7 @@ export function registerRoutes(app: Express): Server {
       });
       res.json({ message: "Tile deleted successfully" });
     } catch (error) {
-      Logger.error("Error deleting tile", error as Error, {
+      Logger.error("Error deleting tile:", error, {
         userId: req.user?.id,
         boardId: req.params.boardId,
         tileId: req.params.id,
@@ -969,7 +884,7 @@ export function registerRoutes(app: Express): Server {
 
       res.json(optimizedSchedule);
     } catch (error) {
-      Logger.error("Error in schedule optimization", error as Error, {
+      Logger.error("Error in schedule optimization:", error, {
         userId: req.user?.id,
         boardId: req.params.boardId,
       });
@@ -1026,7 +941,7 @@ export function registerRoutes(app: Express): Server {
       }
 
       // Delete the actual file from the filesystem
-      const filePath = path.join(process.cwd(), 'uploads', deletedFile.filename);
+      const filePath = path.join(uploadDir, deletedFile.filename);
       if (fs.existsSync(filePath)) {
         fs.unlinkSync(filePath);
       }
@@ -1039,7 +954,7 @@ export function registerRoutes(app: Express): Server {
 
       res.json({ message: "File deleted successfully" });
     } catch (error) {
-      Logger.error("Error deleting file", error as Error, {
+      Logger.error("Error deleting file:", error, {
         userId: req.user?.id,
         boardId: req.params.boardId,
         fileId: req.params.fileId,
@@ -1102,7 +1017,7 @@ export function registerRoutes(app: Express): Server {
       });
       res.json(fileTag);
     } catch (error) {
-      Logger.error("Error adding tag to file", error as Error, {
+      Logger.error("Error adding tag to file:", error, {
         userId: req.user?.id,
         boardId: req.params.boardId,
         fileId: req.params.fileId,
@@ -1160,7 +1075,7 @@ export function registerRoutes(app: Express): Server {
       });
       res.json({ message: "Tag removed successfully" });
     } catch (error) {
-      Logger.error("Error removing tag from file", error as Error, {
+      Logger.error("Error removing tag from file:", error, {
         userId: req.user?.id,
         boardId: req.params.boardId,
         fileId: req.params.fileId,
@@ -1192,7 +1107,7 @@ export function registerRoutes(app: Express): Server {
       });
       res.json(boardTags);
     } catch (error) {
-      Logger.error("Error fetching tags", error as Error, {
+      Logger.error("Error fetching tags:", error, {
         userId: req.user?.id,
         boardId: req.params.boardId,
       });
@@ -1258,7 +1173,10 @@ export function registerRoutes(app: Express): Server {
       // Read all file contents
       const contents = await Promise.all(
         studyUnitFiles.map(async (file) => {
-          const filePath = path.join(process.cwd(), 'uploads', file.filename);
+          const filePath = path.join(uploadDir, file.filename);
+          if (!fs.existsSync(filePath)) {
+            return ""; // Handle missing files gracefully
+          }
           return fsPromises.readFile(filePath, 'utf-8');
         })
       );
@@ -1292,7 +1210,7 @@ export function registerRoutes(app: Express): Server {
 
       res.json(analysis);
     } catch (error) {
-      Logger.error("Error analyzing study unit content", error as Error, {
+      Logger.error("Error analyzing study unit content:", error, {
         userId: req.user?.id,
         boardId: req.params.boardId,
         tileId: req.params.tileId,
@@ -1359,7 +1277,10 @@ export function registerRoutes(app: Express): Server {
       // Read all file contents
       const contents = await Promise.all(
         studyUnitFiles.map(async (file) => {
-          const filePath = path.join(process.cwd(), 'uploads', file.filename);
+          const filePath = path.join(uploadDir, file.filename);
+          if (!fs.existsSync(filePath)) {
+            return ""; // Handle missing files gracefully
+          }
           return fsPromises.readFile(filePath, 'utf-8');
         })
       );
@@ -1392,7 +1313,7 @@ export function registerRoutes(app: Express): Server {
 
       res.json(quiz);
     } catch (error) {
-      Logger.error("Error generating study unit quiz", error as Error, {
+      Logger.error("Error generating study unit quiz:", error, {
         userId: req.user?.id,
         boardId: req.params.boardId,
         tileId: req.params.tileId,

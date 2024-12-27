@@ -3,9 +3,11 @@ import Logger from "../utils/logger";
 import { db } from "@db";
 import { apiQuota, fileSummaries } from "@db/schema";
 import { eq, desc } from "drizzle-orm";
-import fs from "fs/promises";
+import fs from "fs";
 import path from "path";
 import { performOCR } from "./ocr";
+import { PDFDocument } from "pdf-lib";
+import mammoth from "mammoth";
 
 export const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -16,6 +18,59 @@ if (!process.env.OPENAI_API_KEY) {
 interface AnalysisResult {
   summary: string;
   explanation: string;
+}
+
+async function extractTextFromImage(imagePath: string): Promise<string> {
+  try {
+    Logger.info("Starting OCR processing", { imagePath });
+    const result = await performOCR(imagePath);
+
+    if (!result.text) {
+      throw new Error("No text extracted from image");
+    }
+
+    Logger.info("OCR completed successfully", {
+      confidence: result.confidence,
+      textLength: result.text.length
+    });
+
+    return result.text;
+  } catch (error) {
+    Logger.error("Error in OCR processing:", error as Error);
+    throw new Error("Failed to extract text from image");
+  }
+}
+
+async function extractTextFromDocument(filePath: string, mimeType: string): Promise<string> {
+  try {
+    Logger.info("Starting document text extraction", { mimeType });
+
+    let text = '';
+    if (mimeType.includes('word') || mimeType.includes('doc')) {
+      try {
+        const result = await mammoth.extractRawText({ path: filePath });
+        text = result.value;
+        Logger.info("Word document extracted successfully", {
+          textLength: text.length
+        });
+      } catch (docError) {
+        Logger.error("Error with mammoth extraction:", docError);
+        // Fallback to basic text extraction for old .doc files
+        text = await fs.promises.readFile(filePath, 'utf8');
+      }
+    } else if (mimeType === 'text/plain' || mimeType === 'text/markdown') {
+      text = await fs.promises.readFile(filePath, 'utf8');
+    }
+
+    if (!text || text.length < 10) {
+      throw new Error("No valid text content extracted from document");
+    }
+
+    return text;
+  } catch (error) {
+    Logger.error("Error extracting document text:", error as Error);
+    throw new Error("Failed to extract text from document");
+  }
 }
 
 function preprocessText(text: string): string {
@@ -221,15 +276,19 @@ export async function summarizeContent(
     if (typeof content === 'string') {
       textContent = content.trim();
     } else {
-      // If it's an image file
+      // If it's an image or document file
       const uploadDir = path.join(process.cwd(), 'uploads');
-      const tempImagePath = path.join(uploadDir, `temp_${fileId}.jpg`);
-      await fs.writeFile(tempImagePath, content);
+      const tempFilePath = path.join(uploadDir, `temp_${fileId}`);
+      await fs.promises.writeFile(tempFilePath, content);
 
-      textContent = await extractTextFromImage(tempImagePath);
+      if (mimeType && mimeType.includes('image/')) {
+        textContent = await extractTextFromImage(`${tempFilePath}.jpg`);
+      } else {
+        textContent = await extractTextFromDocument(tempFilePath, mimeType || '');
+      }
 
       // Clean up temp file
-      await fs.unlink(tempImagePath).catch(() => {});
+      await fs.promises.unlink(tempFilePath).catch(() => {});
     }
 
     if (!textContent) {
@@ -302,7 +361,7 @@ export async function getQuotaInfo(userId: number) {
   }
 }
 
-export async function getStoredSummary(fileId: number): Promise<FileSummary | null> {
+export async function getStoredSummary(fileId: number) {
   const [summary] = await db
     .select()
     .from(fileSummaries)
