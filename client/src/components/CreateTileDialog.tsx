@@ -47,7 +47,6 @@ export default function CreateTileDialog({ children, boardId }: CreateTileDialog
     priority: "medium",
     tags: [] as string[],
     notes: "",
-    color: parentColor, // Use parent board's color
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -58,7 +57,7 @@ export default function CreateTileDialog({ children, boardId }: CreateTileDialog
       await createTile({
         ...formData,
         dueDate: formData.dueDate ? new Date(formData.dueDate) : null,
-        color: parentColor, // Ensure we use parent's color even if someone changes it
+        color: parentColor, // Always use parent board's color
       });
       toast({
         title: "Success",
@@ -73,7 +72,6 @@ export default function CreateTileDialog({ children, boardId }: CreateTileDialog
         priority: "medium",
         tags: [],
         notes: "",
-        color: parentColor,
       });
     } catch (error) {
       console.error("Failed to create study unit:", error);

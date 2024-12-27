@@ -14,6 +14,7 @@ import { useTiles } from "@/hooks/use-tiles";
 import { useToast } from "@/hooks/use-toast";
 import { useState } from "react";
 import EditTileDialog from "./EditTileDialog";
+import { useBoards } from "@/hooks/use-boards";
 
 interface BoardCardProps {
   tile: Tile;
@@ -34,8 +35,13 @@ const statusColors = {
 
 export default function TileCard({ tile }: BoardCardProps) {
   const [isEditOpen, setIsEditOpen] = useState(false);
-  const { deleteTile } = useTiles(tile.boardId);
+  const { deleteTile } = useTiles(tile.boardId!);
+  const { boards } = useBoards();
   const { toast } = useToast();
+
+  // Get parent board's color
+  const parentBoard = boards?.find(board => board.id === tile.boardId);
+  const parentColor = parentBoard?.color || "#E2E8F0";
 
   const handleDelete = async () => {
     try {
@@ -64,8 +70,8 @@ export default function TileCard({ tile }: BoardCardProps) {
     <>
       <Card
         style={{
-          backgroundColor: tile.color || "#E2E8F0",
-          borderColor: tile.color ? `hsl(from ${tile.color} h s calc(l - 10%))` : undefined
+          backgroundColor: parentColor,
+          borderColor: parentColor ? `hsl(from ${parentColor} h s calc(l - 10%))` : undefined
         }}
       >
         <CardHeader>
