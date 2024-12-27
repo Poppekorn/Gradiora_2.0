@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { setupAuth } from "./auth";
 import { db } from "@db";
-import { boards, tiles, users } from "@db/schema";
+import { boards, tiles } from "@db/schema";
 import { eq } from "drizzle-orm";
 import { optimizeSchedule } from "./optimizer";
 
@@ -16,13 +16,7 @@ export function registerRoutes(app: Express): Server {
     }
 
     try {
-      const userBoards = await db.query.boards.findMany({
-        where: (boards) => eq(boards.organizationId, req.user.organizationId),
-        with: {
-          tiles: true,
-        },
-      });
-
+      const userBoards = await db.select().from(boards);
       res.json(userBoards);
     } catch (error) {
       console.error("Error fetching boards:", error);
@@ -35,12 +29,23 @@ export function registerRoutes(app: Express): Server {
       return res.status(401).send("Not authenticated");
     }
 
-    const board = await db.insert(boards).values({
-      ...req.body,
-      organizationId: req.user.organizationId,
-    }).returning();
+    try {
+      const [board] = await db
+        .insert(boards)
+        .values({
+          name: req.body.name,
+          description: req.body.description,
+          professor: req.body.professor,
+          schedule: req.body.schedule,
+          syllabus: req.body.syllabus,
+        })
+        .returning();
 
-    res.json(board[0]);
+      res.json(board);
+    } catch (error) {
+      console.error("Error creating board:", error);
+      res.status(500).send("Failed to create board");
+    }
   });
 
   // Tiles API

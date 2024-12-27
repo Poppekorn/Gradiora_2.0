@@ -32,7 +32,7 @@ export const boards = pgTable("boards", {
   syllabus: text("syllabus_url"),
   overallGrade: text("overall_grade"),
   isArchived: boolean("is_archived").default(false),
-  organizationId: integer("organization_id").references(() => organizations.id),
+  organizationId: integer("organization_id"),
   createdAt: timestamp("created_at").defaultNow(),
   difficulty: text("difficulty").default("medium"),
   estimatedStudyHours: integer("estimated_study_hours"),
