@@ -54,22 +54,27 @@ export default function TileCard({ tile }: BoardCardProps) {
   };
 
   // Parse external links from JSON
-  const externalLinks: string[] = Array.isArray(tile.externalLinks) 
-    ? tile.externalLinks 
-    : (typeof tile.externalLinks === 'string' 
-      ? JSON.parse(tile.externalLinks) 
+  const externalLinks: string[] = Array.isArray(tile.externalLinks)
+    ? tile.externalLinks
+    : (typeof tile.externalLinks === 'string'
+      ? JSON.parse(tile.externalLinks)
       : []);
 
   return (
     <>
-      <Card>
+      <Card
+        style={{
+          backgroundColor: tile.color || "#E2E8F0",
+          borderColor: tile.color ? `hsl(from ${tile.color} h s calc(l - 10%))` : undefined
+        }}
+      >
         <CardHeader>
           <div className="flex justify-between items-start gap-4">
             <div>
               <h3 className="font-semibold">{tile.title}</h3>
             </div>
             <div className="flex items-center gap-2">
-              <Badge 
+              <Badge
                 className={statusColors[tile.status as keyof typeof statusColors]}
               >
                 {tile.status?.replace("_", " ")}

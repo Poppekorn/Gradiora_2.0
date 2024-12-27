@@ -37,6 +37,7 @@ export const boards = pgTable("boards", {
   difficulty: text("difficulty").default("medium"),
   estimatedStudyHours: integer("estimated_study_hours"),
   recommendedSessionDuration: integer("recommended_session_duration"),
+  color: text("color").default("#E2E8F0"), // Default color (slate-200)
 });
 
 export const tiles = pgTable("tiles", {
@@ -58,18 +59,7 @@ export const tiles = pgTable("tiles", {
   complexity: text("complexity").default("medium"),
   recommendedTimeOfDay: text("recommended_time_of_day"),
   optimalStudyOrder: integer("optimal_study_order"),
-});
-
-export const studySessions = pgTable("study_sessions", {
-  id: serial("id").primaryKey(),
-  userId: integer("user_id").references(() => users.id),
-  tileId: integer("tile_id").references(() => tiles.id),
-  startTime: timestamp("start_time").notNull(),
-  endTime: timestamp("end_time"),
-  duration: integer("duration"),
-  productivityScore: integer("productivity_score"),
-  notes: text("notes"),
-  createdAt: timestamp("created_at").defaultNow(),
+  color: text("color").default("#E2E8F0"), // Default color (slate-200)
 });
 
 // Relations
@@ -90,17 +80,6 @@ export const tilesRelations = relations(tiles, ({ one }) => ({
   board: one(boards, {
     fields: [tiles.boardId],
     references: [boards.id],
-  }),
-}));
-
-export const studySessionsRelations = relations(studySessions, ({ one }) => ({
-  user: one(users, {
-    fields: [studySessions.userId],
-    references: [users.id],
-  }),
-  tile: one(tiles, {
-    fields: [studySessions.tileId],
-    references: [tiles.id],
   }),
 }));
 
@@ -125,11 +104,11 @@ export const selectTileSchema = createSelectSchema(tiles);
 export type Tile = typeof tiles.$inferSelect;
 export type NewTile = typeof tiles.$inferInsert;
 
+// Aliases for backward compatibility
+export type InsertUser = NewUser;
+export type SelectUser = User;
+
 export const insertStudySessionSchema = createInsertSchema(studySessions);
 export const selectStudySessionSchema = createSelectSchema(studySessions);
 export type StudySession = typeof studySessions.$inferSelect;
 export type NewStudySession = typeof studySessions.$inferInsert;
-
-// Aliases for backward compatibility
-export type InsertUser = NewUser;
-export type SelectUser = User;

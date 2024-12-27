@@ -41,6 +41,7 @@ export default function EditTileDialog({ tile, open, onOpenChange }: EditTileDia
     tags: tile.tags || [],
     notes: tile.notes || "",
     grade: tile.grade || "",
+    color: tile.color || "#E2E8F0",
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -172,6 +173,26 @@ export default function EditTileDialog({ tile, open, onOpenChange }: EditTileDia
               onChange={(e) => setFormData(prev => ({ ...prev, grade: e.target.value }))}
               placeholder="A+, 95%, etc."
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="color">Color</Label>
+            <div className="flex gap-2">
+              <Input
+                id="color"
+                type="color"
+                value={formData.color}
+                onChange={(e) => setFormData(prev => ({ ...prev, color: e.target.value }))}
+                className="w-16 p-1 h-10"
+              />
+              <Input
+                type="text"
+                value={formData.color}
+                onChange={(e) => setFormData(prev => ({ ...prev, color: e.target.value }))}
+                placeholder="#E2E8F0"
+                className="font-mono"
+              />
+            </div>
           </div>
 
           <div className="flex justify-end gap-2">

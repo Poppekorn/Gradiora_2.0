@@ -53,7 +53,13 @@ export default function BoardCard({ board }: BoardCardProps) {
 
   return (
     <>
-      <Card className="hover:shadow-lg transition-shadow">
+      <Card 
+        className="hover:shadow-lg transition-shadow"
+        style={{ 
+          backgroundColor: board.color || "#E2E8F0",
+          borderColor: board.color ? `hsl(from ${board.color} h s calc(l - 10%))` : undefined
+        }}
+      >
         <CardHeader>
           <div className="flex justify-between items-start">
             <div className="flex-1">

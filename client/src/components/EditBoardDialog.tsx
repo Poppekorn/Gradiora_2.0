@@ -24,13 +24,14 @@ export default function EditBoardDialog({ board, open, onOpenChange }: EditBoard
   const [loading, setLoading] = useState(false);
   const { updateBoard } = useBoards();
   const { toast } = useToast();
-  
+
   const [formData, setFormData] = useState({
     name: board.name,
     description: board.description || "",
     professor: board.professor || "",
     schedule: board.schedule || "",
     syllabus: board.syllabus || "",
+    color: board.color || "#E2E8F0",
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -74,7 +75,7 @@ export default function EditBoardDialog({ board, open, onOpenChange }: EditBoard
               required
             />
           </div>
-          
+
           <div className="space-y-2">
             <Label htmlFor="description">Description</Label>
             <Textarea
@@ -111,6 +112,26 @@ export default function EditBoardDialog({ board, open, onOpenChange }: EditBoard
               value={formData.syllabus}
               onChange={(e) => setFormData(prev => ({ ...prev, syllabus: e.target.value }))}
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="color">Color</Label>
+            <div className="flex gap-2">
+              <Input
+                id="color"
+                type="color"
+                value={formData.color}
+                onChange={(e) => setFormData(prev => ({ ...prev, color: e.target.value }))}
+                className="w-16 p-1 h-10"
+              />
+              <Input
+                type="text"
+                value={formData.color}
+                onChange={(e) => setFormData(prev => ({ ...prev, color: e.target.value }))}
+                placeholder="#E2E8F0"
+                className="font-mono"
+              />
+            </div>
           </div>
 
           <div className="flex justify-end gap-2">
