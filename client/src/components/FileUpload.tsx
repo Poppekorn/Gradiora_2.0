@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useFiles } from "@/hooks/use-files";
 import { useTiles } from "@/hooks/use-tiles";
+import { useBoards } from "@/hooks/use-boards";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import {
@@ -65,7 +66,60 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
 
   const { uploadFile, createTag, tags } = useFiles(boardId);
   const { tiles } = useTiles(boardId);
+  const { boards } = useBoards();
   const { toast } = useToast();
+
+  // Create board tag when component mounts
+  useEffect(() => {
+    const createBoardTag = async () => {
+      const board = boards?.find(b => b.id === boardId);
+      if (!board) return;
+
+      const boardTagName = board.name;
+      const boardTagExists = tags?.some(
+        tag => normalizeTagName(tag.name) === normalizeTagName(boardTagName)
+      );
+
+      if (!boardTagExists) {
+        try {
+          await createTag({
+            name: boardTagName,
+            isStudyUnitTag: false,
+          });
+        } catch (error) {
+          console.error(`Failed to create board tag: ${error}`);
+        }
+      }
+    };
+
+    createBoardTag();
+  }, [boards, boardId, tags, createTag]);
+
+  // Create study unit tags
+  useEffect(() => {
+    const createStudyUnitTags = async () => {
+      if (!tiles?.length) return;
+
+      for (const tile of tiles) {
+        const tileTagExists = tags?.some(
+          tag => normalizeTagName(tag.name) === normalizeTagName(tile.title) && tag.isStudyUnitTag
+        );
+
+        if (!tileTagExists) {
+          try {
+            await createTag({
+              name: tile.title,
+              isStudyUnitTag: true,
+            });
+          } catch (error) {
+            console.error(`Failed to create study unit tag: ${error}`);
+          }
+        }
+      }
+    };
+
+    createStudyUnitTags();
+  }, [tiles, tags, createTag]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -175,33 +229,6 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
       });
     }
   };
-
-  // Create study unit tags only once when tiles change
-  useEffect(() => {
-    const createMissingTags = async () => {
-      if (!tiles?.length || !tags?.length) return;
-
-      for (const tile of tiles) {
-        const normalizedTileTitle = tile.title.toLowerCase();
-        const tagExists = tags.some(
-          tag => tag.name.toLowerCase() === normalizedTileTitle && tag.isStudyUnitTag
-        );
-
-        if (!tagExists) {
-          try {
-            await createTag({
-              name: tile.title,
-              isStudyUnitTag: true,
-            });
-          } catch (error) {
-            console.error(`Failed to create tag for study unit ${tile.title}:`, error);
-          }
-        }
-      }
-    };
-
-    createMissingTags();
-  }, [tiles, tags, createTag]);
 
   const toggleTag = (tagId: number) => {
     setSelectedTags(prev =>
