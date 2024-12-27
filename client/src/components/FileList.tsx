@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useFiles } from "@/hooks/use-files";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { File as FileIcon, Tag, Plus, Trash2 } from "lucide-react";
+import { File as FileIcon, Tag, Plus, Trash2, X } from "lucide-react";
 import { format } from "date-fns";
 import type { FileTag, Tag as TagType } from "@db/schema";
 import {
@@ -11,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -92,10 +93,11 @@ export default function FileList({ boardId }: FileListProps) {
       }
 
       // If no similar tags found, create the new tag
-      await createTag({
+      const tag = await createTag({
         name: newTagName.trim(),
         isStudyUnitTag: false,
       });
+
       setNewTagName("");
       toast({
         title: "Success",
@@ -114,14 +116,22 @@ export default function FileList({ boardId }: FileListProps) {
     try {
       if (hasTag) {
         await removeTagFromFile({ fileId, tagId });
+        toast({
+          title: "Success",
+          description: "Tag removed successfully",
+        });
       } else {
         await addTagToFile({ fileId, tagId });
+        toast({
+          title: "Success",
+          description: "Tag added successfully",
+        });
       }
     } catch (error) {
       toast({
         variant: "destructive",
         title: "Error",
-        description: "Failed to update file tags",
+        description: hasTag ? "Failed to remove tag" : "Failed to add tag",
       });
     }
   };
@@ -198,9 +208,24 @@ export default function FileList({ boardId }: FileListProps) {
                 <Tag className="h-4 w-4 mt-1" />
                 <div className="flex flex-wrap gap-2">
                   {file.tags?.map(({ tag }) => (
-                    <Badge key={tag.id} variant="secondary">
+                    <Badge 
+                      key={tag.id} 
+                      variant="secondary"
+                      className="flex items-center gap-1"
+                    >
                       {tag.name}
                       {tag.isStudyUnitTag && " (Study Unit)"}
+                      {!tag.isStudyUnitTag && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleTag(file.id, tag.id, true);
+                          }}
+                          className="ml-1 hover:text-destructive"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      )}
                     </Badge>
                   ))}
                 </div>
@@ -245,11 +270,22 @@ export default function FileList({ boardId }: FileListProps) {
                     <Badge
                       key={tag.id}
                       variant={hasTag ? "default" : "outline"}
-                      className="cursor-pointer"
+                      className={`cursor-pointer ${hasTag && !tag.isStudyUnitTag ? 'pr-1' : ''}`}
                       onClick={() => selectedFile && toggleTag(selectedFile.id, tag.id, !!hasTag)}
                     >
                       {tag.name}
                       {tag.isStudyUnitTag && " (Study Unit)"}
+                      {hasTag && !tag.isStudyUnitTag && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            selectedFile && toggleTag(selectedFile.id, tag.id, true);
+                          }}
+                          className="ml-1 hover:text-destructive"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      )}
                     </Badge>
                   );
                 })}
