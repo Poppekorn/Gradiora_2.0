@@ -107,8 +107,3 @@ export type NewTile = typeof tiles.$inferInsert;
 // Aliases for backward compatibility
 export type InsertUser = NewUser;
 export type SelectUser = User;
-
-export const insertStudySessionSchema = createInsertSchema(studySessions);
-export const selectStudySessionSchema = createSelectSchema(studySessions);
-export type StudySession = typeof studySessions.$inferSelect;
-export type NewStudySession = typeof studySessions.$inferInsert;
