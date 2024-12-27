@@ -7,6 +7,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -20,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
+import { useBoards } from "@/hooks/use-boards";
 
 interface CreateTileDialogProps {
   children: React.ReactNode;
@@ -30,7 +32,12 @@ export default function CreateTileDialog({ children, boardId }: CreateTileDialog
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const { createTile } = useTiles(boardId);
+  const { boards } = useBoards();
   const { toast } = useToast();
+
+  // Get the parent board's color
+  const parentBoard = boards?.find(board => board.id === boardId);
+  const parentColor = parentBoard?.color || "#E2E8F0";
 
   const [formData, setFormData] = useState({
     title: "",
@@ -40,7 +47,7 @@ export default function CreateTileDialog({ children, boardId }: CreateTileDialog
     priority: "medium",
     tags: [] as string[],
     notes: "",
-    color: "#E2E8F0",
+    color: parentColor, // Use parent board's color
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -51,6 +58,7 @@ export default function CreateTileDialog({ children, boardId }: CreateTileDialog
       await createTile({
         ...formData,
         dueDate: formData.dueDate ? new Date(formData.dueDate) : null,
+        color: parentColor, // Ensure we use parent's color even if someone changes it
       });
       toast({
         title: "Success",
@@ -65,13 +73,14 @@ export default function CreateTileDialog({ children, boardId }: CreateTileDialog
         priority: "medium",
         tags: [],
         notes: "",
-        color: "#E2E8F0",
+        color: parentColor,
       });
     } catch (error) {
+      console.error("Failed to create study unit:", error);
       toast({
         variant: "destructive",
         title: "Error",
-        description: "Failed to create study unit",
+        description: error instanceof Error ? error.message : "Failed to create study unit",
       });
     } finally {
       setLoading(false);
@@ -86,6 +95,9 @@ export default function CreateTileDialog({ children, boardId }: CreateTileDialog
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Create Study Unit</DialogTitle>
+          <DialogDescription>
+            Add a new study unit to your class. The color will match the parent class.
+          </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
@@ -174,26 +186,6 @@ export default function CreateTileDialog({ children, boardId }: CreateTileDialog
               value={formData.notes}
               onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
             />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="color">Color</Label>
-            <div className="flex gap-2">
-              <Input
-                id="color"
-                type="color"
-                value={formData.color}
-                onChange={(e) => setFormData(prev => ({ ...prev, color: e.target.value }))}
-                className="w-16 p-1 h-10"
-              />
-              <Input
-                type="text"
-                value={formData.color}
-                onChange={(e) => setFormData(prev => ({ ...prev, color: e.target.value }))}
-                placeholder="#E2E8F0"
-                className="font-mono"
-              />
-            </div>
           </div>
 
           <div className="flex justify-end gap-2">

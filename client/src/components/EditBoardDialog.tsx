@@ -7,6 +7,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -39,20 +40,26 @@ export default function EditBoardDialog({ board, open, onOpenChange }: EditBoard
     setLoading(true);
 
     try {
-      await updateBoard({
+      const updatedBoard = await updateBoard({
         ...board,
         ...formData,
       });
+
+      if (!updatedBoard) {
+        throw new Error("Failed to update class");
+      }
+
       toast({
         title: "Success",
         description: "Class updated successfully",
       });
       onOpenChange(false);
     } catch (error) {
+      console.error("Failed to update class:", error);
       toast({
         variant: "destructive",
         title: "Error",
-        description: "Failed to update class",
+        description: error instanceof Error ? error.message : "Failed to update class",
       });
     } finally {
       setLoading(false);
@@ -64,6 +71,9 @@ export default function EditBoardDialog({ board, open, onOpenChange }: EditBoard
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Edit Class</DialogTitle>
+          <DialogDescription>
+            Make changes to your class here. Click save when you're done.
+          </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
