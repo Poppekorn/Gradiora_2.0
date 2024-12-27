@@ -4,14 +4,15 @@ import { format, isAfter, isBefore, addDays } from "date-fns";
 import { Badge } from "@/components/ui/badge";
 import { CalendarDays } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import type { Tile } from "@db/schema";
 
 export default function DeadlinesWidget() {
   const { boards } = useBoards();
-  
+
   // Get all tiles from all boards and filter for upcoming deadlines
   const upcomingDeadlines = boards?.flatMap(board => {
-    const tiles = []; // TODO: Get tiles for each board
-    return tiles.filter(tile => {
+    const { tiles } = useTiles(board.id);
+    return (tiles || []).filter(tile => {
       if (!tile.dueDate) return false;
       const dueDate = new Date(tile.dueDate);
       return isAfter(dueDate, new Date()) && isBefore(dueDate, addDays(new Date(), 14));
@@ -20,7 +21,7 @@ export default function DeadlinesWidget() {
       boardName: board.name,
       boardColor: board.color,
     }));
-  }).sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+  }).sort((a, b) => new Date(a.dueDate!).getTime() - new Date(b.dueDate!).getTime());
 
   return (
     <ScrollArea className="h-full">
@@ -31,10 +32,10 @@ export default function DeadlinesWidget() {
         </div>
 
         <div className="space-y-3">
-          {upcomingDeadlines?.length === 0 ? (
+          {!upcomingDeadlines || upcomingDeadlines.length === 0 ? (
             <p className="text-sm text-muted-foreground">No upcoming deadlines</p>
           ) : (
-            upcomingDeadlines?.map(tile => (
+            upcomingDeadlines.map(tile => (
               <div
                 key={tile.id}
                 className="flex items-start justify-between gap-2 p-2 rounded-lg border"
@@ -51,7 +52,7 @@ export default function DeadlinesWidget() {
                     color: 'white'
                   }}
                 >
-                  {format(new Date(tile.dueDate), 'MMM d')}
+                  {format(new Date(tile.dueDate!), 'MMM d')}
                 </Badge>
               </div>
             ))

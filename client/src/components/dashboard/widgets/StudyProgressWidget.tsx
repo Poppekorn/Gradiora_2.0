@@ -4,14 +4,24 @@ import { useBoards } from "@/hooks/use-boards";
 
 export default function StudyProgressWidget() {
   const { boards } = useBoards();
-  
-  const totalProgress = boards?.reduce((acc, board) => {
-    const completedTiles = 0; // TODO: Calculate from tiles
-    const totalTiles = 0; // TODO: Get total tiles
-    return acc + (completedTiles / totalTiles) || 0;
-  }, 0);
 
-  const averageProgress = (totalProgress || 0) / (boards?.length || 1) * 100;
+  const boardsProgress = boards?.map(board => {
+    const { tiles } = useTiles(board.id);
+    const totalTiles = tiles?.length || 0;
+    const completedTiles = tiles?.filter(tile => tile.status === "completed").length || 0;
+    const progress = totalTiles > 0 ? (completedTiles / totalTiles) * 100 : 0;
+
+    return {
+      board,
+      progress,
+      completedTiles,
+      totalTiles
+    };
+  }) || [];
+
+  const totalCompletedTiles = boardsProgress.reduce((acc, curr) => acc + curr.completedTiles, 0);
+  const totalTiles = boardsProgress.reduce((acc, curr) => acc + curr.totalTiles, 0);
+  const averageProgress = totalTiles > 0 ? (totalCompletedTiles / totalTiles) * 100 : 0;
 
   return (
     <div className="space-y-4">
@@ -22,23 +32,17 @@ export default function StudyProgressWidget() {
           {averageProgress.toFixed(1)}% Complete
         </p>
       </div>
-      
+
       <div className="space-y-2">
-        {boards?.map(board => {
-          const completedTiles = 0; // TODO: Calculate from tiles
-          const totalTiles = 0; // TODO: Get total tiles
-          const progress = (completedTiles / totalTiles) * 100 || 0;
-          
-          return (
-            <div key={board.id}>
-              <div className="flex justify-between text-sm mb-1">
-                <span>{board.name}</span>
-                <span>{progress.toFixed(1)}%</span>
-              </div>
-              <Progress value={progress} className="h-1.5" />
+        {boardsProgress.map(({ board, progress }) => (
+          <div key={board.id}>
+            <div className="flex justify-between text-sm mb-1">
+              <span>{board.name}</span>
+              <span>{progress.toFixed(1)}%</span>
             </div>
-          );
-        })}
+            <Progress value={progress} className="h-1.5" />
+          </div>
+        ))}
       </div>
     </div>
   );
