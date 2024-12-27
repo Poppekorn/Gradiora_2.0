@@ -34,7 +34,7 @@ export default function BoardCard({ board }: BoardCardProps) {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const { deleteBoard } = useBoards();
   const { toast } = useToast();
-  const [, setLocation] = useLocation();
+  const [, navigate] = useLocation();
 
   const handleDelete = async () => {
     try {
@@ -43,12 +43,13 @@ export default function BoardCard({ board }: BoardCardProps) {
         title: "Success",
         description: "Class and all associated study units deleted successfully",
       });
+      setIsDeleteDialogOpen(false);
     } catch (error) {
       console.error("Error deleting board:", error);
       toast({
         variant: "destructive",
         title: "Error",
-        description: "Failed to delete class",
+        description: "Failed to delete class. Please try again.",
       });
     }
   };
@@ -61,7 +62,7 @@ export default function BoardCard({ board }: BoardCardProps) {
       return;
     }
     e.preventDefault();
-    setLocation(`/boards/${board.id}`);
+    navigate(`/boards/${board.id}`);
   };
 
   return (

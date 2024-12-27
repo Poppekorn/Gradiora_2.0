@@ -175,7 +175,7 @@ export function registerRoutes(app: Express): Server {
     try {
       const boardId = parseInt(req.params.id);
 
-      // First, delete all file tags
+      // First delete all file tags
       await db
         .delete(fileTags)
         .where(
@@ -213,6 +213,16 @@ export function registerRoutes(app: Express): Server {
         .where(eq(tiles.boardId, boardId));
 
       Logger.info("Associated tiles deleted", {
+        boardId: req.params.id,
+        userId: req.user?.id,
+      });
+
+      // Delete all tags associated with this board
+      await db
+        .delete(tags)
+        .where(eq(tags.boardId, boardId));
+
+      Logger.info("Associated tags deleted", {
         boardId: req.params.id,
         userId: req.user?.id,
       });
