@@ -7,6 +7,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -29,7 +30,7 @@ interface EditTileDialogProps {
 
 export default function EditTileDialog({ tile, open, onOpenChange }: EditTileDialogProps) {
   const [loading, setLoading] = useState(false);
-  const { updateTile } = useTiles(tile.boardId);
+  const { updateTile } = useTiles(tile.boardId!); // Assert boardId is non-null
   const { toast } = useToast();
 
   const [formData, setFormData] = useState({
@@ -60,10 +61,11 @@ export default function EditTileDialog({ tile, open, onOpenChange }: EditTileDia
       });
       onOpenChange(false);
     } catch (error) {
+      console.error("Failed to update study unit:", error);
       toast({
         variant: "destructive",
         title: "Error",
-        description: "Failed to update study unit",
+        description: error instanceof Error ? error.message : "Failed to update study unit",
       });
     } finally {
       setLoading(false);
@@ -75,6 +77,9 @@ export default function EditTileDialog({ tile, open, onOpenChange }: EditTileDia
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Edit Study Unit</DialogTitle>
+          <DialogDescription>
+            Make changes to your study unit here. Click save when you're done.
+          </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">

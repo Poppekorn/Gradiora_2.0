@@ -45,6 +45,11 @@ export function registerRoutes(app: Express): Server {
     }
 
     try {
+      Logger.info("Attempting to create board", {
+        userId: req.user?.id,
+        payload: { ...req.body, password: undefined }, // Log request data except sensitive info
+      });
+
       const [board] = await db
         .insert(boards)
         .values({
@@ -53,12 +58,14 @@ export function registerRoutes(app: Express): Server {
           professor: req.body.professor,
           schedule: req.body.schedule,
           syllabus: req.body.syllabus,
+          color: req.body.color || "#E2E8F0", // Ensure color is included
         })
         .returning();
 
       Logger.info("Board created successfully", {
         boardId: board.id,
         userId: req.user?.id,
+        color: board.color, // Log the color that was set
       });
       res.json(board);
     } catch (error) {
