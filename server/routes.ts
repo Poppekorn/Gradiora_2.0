@@ -656,13 +656,16 @@ export function registerRoutes(app: Express): Server {
     }
 
     try {
-      // Check for existing tag first
-      const existingTag = await db.query.tags.findFirst({
-        where: (tags, { and, eq, sql }) => and(
-          eq(tags.boardId, parseInt(req.params.boardId)),
-          sql`lower(${tags.name}) = lower(${req.body.name.trim()})`
-        ),
-      });
+      const normalizedName = req.body.name.trim();
+
+      // Check for existing tag with normalized name comparison
+      const [existingTag] = await db
+        .select()
+        .from(tags)
+        .where(
+          sql`lower(trim(${tags.name})) = lower(${normalizedName}) AND ${tags.boardId} = ${parseInt(req.params.boardId)}`
+        )
+        .limit(1);
 
       if (existingTag) {
         Logger.info("Returning existing tag", {
@@ -676,7 +679,7 @@ export function registerRoutes(app: Express): Server {
       const [tag] = await db
         .insert(tags)
         .values({
-          name: req.body.name.trim(),
+          name: normalizedName,
           boardId: parseInt(req.params.boardId),
           isStudyUnitTag: req.body.isStudyUnitTag || false,
         })
@@ -694,6 +697,12 @@ export function registerRoutes(app: Express): Server {
         boardId: req.params.boardId,
         payload: req.body,
       });
+
+      // Check if the error is a unique constraint violation
+      if ((error as any)?.code === '23505') {
+        return res.status(409).send("A tag with this name already exists");
+      }
+
       res.status(500).send("Failed to create tag");
     }
   });
