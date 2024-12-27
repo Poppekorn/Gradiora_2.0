@@ -89,6 +89,12 @@ export function registerRoutes(app: Express): Server {
     }
 
     try {
+      Logger.info("Attempting to update board", {
+        boardId: req.params.id,
+        userId: req.user?.id,
+        payload: { ...req.body, password: undefined },
+      });
+
       const [updatedBoard] = await db
         .update(boards)
         .set({
@@ -98,6 +104,7 @@ export function registerRoutes(app: Express): Server {
           schedule: req.body.schedule,
           syllabus: req.body.syllabus,
           isArchived: req.body.isArchived,
+          color: req.body.color || "#E2E8F0", // Add color handling
         })
         .where(eq(boards.id, parseInt(req.params.id)))
         .returning();
@@ -113,6 +120,7 @@ export function registerRoutes(app: Express): Server {
       Logger.info("Board updated successfully", {
         boardId: updatedBoard.id,
         userId: req.user?.id,
+        color: updatedBoard.color, // Log the updated color
       });
       res.json(updatedBoard);
     } catch (error) {
