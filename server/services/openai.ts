@@ -5,12 +5,13 @@ import { apiQuota, fileSummaries } from "@db/schema";
 import { eq, desc } from "drizzle-orm";
 import fs from "fs/promises";
 import path from "path";
+import { performOCR } from "./ocr";
+
+export const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 if (!process.env.OPENAI_API_KEY) {
   throw new Error("OPENAI_API_KEY environment variable is not set");
 }
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 interface AnalysisResult {
   summary: string;
@@ -19,37 +20,20 @@ interface AnalysisResult {
 
 async function extractTextFromImage(imagePath: string): Promise<string> {
   try {
-    // Read the image file as base64
-    const imageBuffer = await fs.readFile(imagePath);
-    const base64Image = imageBuffer.toString('base64');
+    Logger.info("Starting OCR text extraction", { imagePath });
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-4-vision-preview",
-      messages: [
-        {
-          role: "system",
-          content: "You are a precise document transcriber. Extract and return all text content from the image, preserving the original structure and formatting where possible. Focus only on the text content, not on describing the image."
-        },
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: "Please extract all text content from this image:"
-            },
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:image/jpeg;base64,${base64Image}`
-              }
-            }
-          ],
-        }
-      ],
-      max_tokens: 1000,
+    const ocrResult = await performOCR(imagePath);
+
+    if (!ocrResult.text) {
+      throw new Error("No text extracted from image");
+    }
+
+    Logger.info("OCR extraction completed", {
+      confidence: ocrResult.confidence,
+      textLength: ocrResult.text.length
     });
 
-    return response.choices[0].message.content || '';
+    return ocrResult.text;
   } catch (error) {
     Logger.error("Error extracting text from image:", error);
     throw new Error("Failed to extract text from image");
