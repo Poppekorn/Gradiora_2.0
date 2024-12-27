@@ -9,7 +9,7 @@ import Logger from "./utils/logger";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
-import { analyzeContent, generateQuiz, analyzeMultipleContents } from "./services/openai";
+import { analyzeContent, generateQuiz, analyzeMultipleContents, summarizeContent } from "./services/openai"; // Added summarizeContent import
 import { readFile } from "fs/promises";
 
 
@@ -953,7 +953,7 @@ export function registerRoutes(app: Express): Server {
       res.json(analysis);
     } catch (error) {
       Logger.error("Error analyzing file", error as Error, {
-        userId: req.user?.id,
+        userId: requser?.id,
         boardId: req.params.boardId,
         fileId: req.params.fileId,
       });
@@ -1222,6 +1222,63 @@ export function registerRoutes(app: Express): Server {
         tileId: req.params.tileId,
       });
       res.status(500).send("Failed to generate study unit quiz");
+    }
+  });
+
+  //New Summarize endpoint
+  app.post("/api/boards/:boardId/files/:fileId/summarize", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      Logger.warn("Unauthorized file summarization attempt", {
+        ip: req.ip,
+        headers: req.headers,
+        boardId: req.params.boardId,
+        fileId: req.params.fileId,
+      });
+      return res.status(401).send("Not authenticated");
+    }
+
+    try {
+      // Get file record
+      const [file] = await db
+        .select()
+        .from(files)
+        .where(eq(files.id, parseInt(req.params.fileId)))
+        .limit(1);
+
+      if (!file) {
+        return res.status(404).send("File not found");
+      }
+
+      // Read file content
+      const filePath = path.join(process.cwd(), 'uploads', file.filename);
+      const content = await readFile(filePath, 'utf-8');
+
+      const educationLevel = req.body.educationLevel || 'high_school';
+
+      // Get summary
+      const summary = await summarizeContent(content, educationLevel);
+
+      Logger.info("File summarized successfully", {
+        fileId: req.params.fileId,
+        boardId: req.params.boardId,
+        userId: req.user?.id,
+        educationLevel,
+      });
+
+      res.json(summary);
+    } catch (error) {
+      Logger.error("Error summarizing file", error as Error, {
+        userId: req.user?.id,
+        boardId: req.params.boardId,
+        fileId: req.params.fileId,
+      });
+
+      // Check if error is due to token limit
+      if ((error as Error).message.includes('Request too large')) {
+        return res.status(413).send("File is too large to summarize. Try breaking it into smaller sections.");
+      }
+
+      res.status(500).send("Failed to summarize file");
     }
   });
 

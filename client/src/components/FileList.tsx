@@ -72,6 +72,11 @@ interface QuizResult {
   questions: QuizQuestion[];
 }
 
+interface SummaryResult {
+  summary: string;
+  explanation: string;
+}
+
 export default function FileList({ boardId }: FileListProps) {
   const [selectedFile, setSelectedFile] = useState<FileWithTags | null>(null);
   const [newTagName, setNewTagName] = useState("");
@@ -85,6 +90,9 @@ export default function FileList({ boardId }: FileListProps) {
   const [analysisResult, setAnalysisResult] = useState<AIAnalysisResult | null>(null);
   const [quizResult, setQuizResult] = useState<QuizResult | null>(null);
   const [educationLevel, setEducationLevel] = useState("high_school");
+  const [showSummaryDialog, setShowSummaryDialog] = useState(false);
+  const [summaryResult, setSummaryResult] = useState<SummaryResult | null>(null);
+  const [quizCompleted, setQuizCompleted] = useState<number | null>(null);
 
   const analyzeMutation = useMutation({
     mutationFn: async (fileId: number) => {
@@ -116,6 +124,19 @@ export default function FileList({ boardId }: FileListProps) {
     mutationFn: async (fileId: number) => {
       const response = await fetch(`/api/boards/${boardId}/files/${fileId}/quiz`, {
         method: 'POST',
+        credentials: 'include',
+      });
+      if (!response.ok) throw new Error(await response.text());
+      return response.json();
+    },
+  });
+
+  const summaryMutation = useMutation({
+    mutationFn: async (fileId: number) => {
+      const response = await fetch(`/api/boards/${boardId}/files/${fileId}/summarize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ educationLevel }),
         credentials: 'include',
       });
       if (!response.ok) throw new Error(await response.text());
@@ -161,6 +182,20 @@ export default function FileList({ boardId }: FileListProps) {
         variant: "destructive",
         title: "Error",
         description: "Failed to generate quiz",
+      });
+    }
+  };
+
+  const handleSummarize = async (fileId: number) => {
+    try {
+      const result = await summaryMutation.mutateAsync(fileId);
+      setSummaryResult(result);
+      setShowSummaryDialog(true);
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to summarize file",
       });
     }
   };
@@ -261,6 +296,11 @@ export default function FileList({ boardId }: FileListProps) {
     }
   };
 
+  const handleQuizComplete = async (fileId: number, score: number) => {
+    setQuizCompleted(fileId);
+    // You could save the quiz results here if needed
+  };
+
   if (isLoading) {
     return <div>Loading files...</div>;
   }
@@ -345,19 +385,20 @@ export default function FileList({ boardId }: FileListProps) {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem 
-                          onClick={() => {
-                            setEducationLevel("high_school"); // Reset to default
-                            handleAnalyze(file.id);
-                          }}
-                        >
-                          <Brain className="mr-2 h-4 w-4" />
-                          Analyze
+                        <DropdownMenuItem onClick={() => handleSummarize(file.id)}>
+                          <BookOpen className="mr-2 h-4 w-4" />
+                          Summarize
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => handleGenerateQuiz(file.id)}>
                           <GraduationCap className="mr-2 h-4 w-4" />
-                          Generate Quiz
+                          Take Quiz
                         </DropdownMenuItem>
+                        {quizCompleted === file.id && (
+                          <DropdownMenuItem onClick={() => handleAnalyze(file.id)}>
+                            <Brain className="mr-2 h-4 w-4" />
+                            Analyze Performance
+                          </DropdownMenuItem>
+                        )}
                         <DropdownMenuItem onClick={() => handleDeleteFile(file.id)} className="text-red-500">
                           <Trash2 className="mr-2 h-4 w-4" />
                           Delete
@@ -453,6 +494,17 @@ export default function FileList({ boardId }: FileListProps) {
                     </p>
                   </div>
                 ))}
+                <Button 
+                  onClick={() => {
+                    if (quizResult) {
+                      handleQuizComplete(selectedFile?.id || 0, 0); // Add actual score calculation
+                      setShowQuizDialog(false);
+                    }
+                  }}
+                  className="mt-4"
+                >
+                  Complete Quiz
+                </Button>
               </div>
             )}
           </ScrollArea>
@@ -516,6 +568,31 @@ export default function FileList({ boardId }: FileListProps) {
               </div>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showSummaryDialog} onOpenChange={setShowSummaryDialog}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Content Summary ({educationLevel.replace('_', ' ')})</DialogTitle>
+            <DialogDescription>
+              Here's a summary of the content
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="max-h-[60vh]">
+            {summaryResult && (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="text-lg font-semibold mb-2">Summary</h3>
+                  <p className="text-muted-foreground">{summaryResult.summary}</p>
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold mb-2">Detailed Explanation</h3>
+                  <p className="text-muted-foreground whitespace-pre-wrap">{summaryResult.explanation}</p>
+                </div>
+              </div>
+            )}
+          </ScrollArea>
         </DialogContent>
       </Dialog>
 

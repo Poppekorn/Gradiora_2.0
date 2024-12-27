@@ -236,3 +236,55 @@ export async function analyzeMultipleContents(contents: string[], level: string 
     throw new Error("Failed to analyze multiple contents: " + (error as Error).message);
   }
 }
+
+export async function summarizeContent(content: string, level: string = 'high_school'): Promise<AnalysisResult> {
+  try {
+    Logger.info("Summarizing content with OpenAI", { level, contentLength: content.length });
+
+    const chunks = chunkText(content);
+    Logger.info(`Content split into ${chunks.length} chunks`);
+
+    let summaries: AnalysisResult[] = [];
+
+    for (const chunk of chunks) {
+      try {
+        const response = await openai.chat.completions.create({
+          model: "gpt-4",
+          messages: [
+            {
+              role: "system",
+              content: `You are a skilled educator. Create a clear summary of the following content tailored for ${level} level students. Include both a brief overview and a more detailed explanation.`
+            },
+            {
+              role: "user",
+              content: chunk
+            }
+          ],
+          temperature: 0.7
+        });
+
+        const result = response.choices[0].message?.content;
+        if (result) {
+          summaries.push({
+            summary: result.split('\n\n')[0] || '',
+            explanation: result.split('\n\n').slice(1).join('\n\n') || ''
+          });
+        }
+      } catch (error) {
+        Logger.error("Error summarizing chunk", error as Error);
+        throw error;
+      }
+    }
+
+    // Combine all summaries
+    const combinedSummary = {
+      summary: summaries.map(s => s.summary).join('\n'),
+      explanation: summaries.map(s => s.explanation).join('\n\n')
+    };
+
+    return combinedSummary;
+  } catch (error) {
+    Logger.error("Error summarizing content with OpenAI", error as Error);
+    throw new Error("Failed to summarize content: " + (error as Error).message);
+  }
+}
