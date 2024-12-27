@@ -66,12 +66,35 @@ export function registerRoutes(app: Express): Server {
       return res.status(401).send("Not authenticated");
     }
 
-    const tile = await db.insert(tiles).values({
-      ...req.body,
-      boardId: parseInt(req.params.boardId),
-    }).returning();
+    try {
+      // Parse and validate the date
+      let dueDate = null;
+      if (req.body.dueDate) {
+        dueDate = new Date(req.body.dueDate);
+        if (isNaN(dueDate.getTime())) {
+          return res.status(400).send("Invalid due date format");
+        }
+      }
 
-    res.json(tile[0]);
+      const [tile] = await db
+        .insert(tiles)
+        .values({
+          boardId: parseInt(req.params.boardId),
+          title: req.body.title,
+          description: req.body.description,
+          dueDate: dueDate,
+          status: req.body.status,
+          priority: req.body.priority,
+          tags: req.body.tags,
+          notes: req.body.notes,
+        })
+        .returning();
+
+      res.json(tile);
+    } catch (error) {
+      console.error("Error creating tile:", error);
+      res.status(500).send("Failed to create tile");
+    }
   });
 
   // Schedule Optimization API
