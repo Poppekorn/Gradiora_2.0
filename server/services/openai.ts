@@ -144,20 +144,17 @@ async function processChunks(chunks: string[], userId: number, level: string): P
       messages: [
         {
           role: "system",
-          content: `You are a knowledgeable content summarizer for ${level} students. Create a clear, focused summary of the content's key points and main ideas, followed by a detailed explanation. 
+          content: `You are an expert content summarizer specializing in OCR-extracted text for ${level} students. Your task is to:
 
-When summarizing:
-1. Focus on the actual content and its meaning
-2. Identify and highlight key information (e.g., pricing details, features, benefits)
-3. Structure the information logically (e.g., group related items together)
-4. Use clear, ${level}-appropriate language
-5. If the content includes lists or plans, maintain their structure in the summary
+1. Clean and interpret the OCR-extracted text, accounting for common OCR artifacts and formatting issues
+2. Create a clear, focused summary of the key points
+3. Provide a detailed explanation that elaborates on the main concepts
+4. Use language appropriate for ${level} level
+5. Maintain academic rigor while ensuring clarity
 
-Do not:
-- Include any technical formatting details
-- Mention document types or file formats
-- Include metadata or structural elements
-- Add information not present in the original content`
+Respond with two sections:
+1. "Summary": A concise overview of the main points
+2. "Explanation": A detailed breakdown of the concepts`
         },
         {
           role: "user",
@@ -175,29 +172,33 @@ Do not:
       throw new Error("Empty response from OpenAI");
     }
 
-    // Split response into summary and explanation
-    const parts = result.split("\n\n");
+    // Parse the response into summary and explanation sections
+    const sections = result.split(/(?=Summary:|Explanation:)/g);
+    const summary = sections.find(s => s.includes("Summary:"))?.replace("Summary:", "").trim() || '';
+    const explanation = sections.find(s => s.includes("Explanation:"))?.replace("Explanation:", "").trim() || '';
+
     return {
-      summary: parts[0] || '',
-      explanation: parts.slice(1).join("\n\n") || ''
+      summary,
+      explanation
     };
   }));
 
   // Combine summaries intelligently
   const combinedSummary = summaries
     .map(s => s.summary)
-    .join("\n")
+    .filter(Boolean)
+    .join("\n\n")
     .trim();
 
   const combinedExplanation = summaries
     .map(s => s.explanation)
-    .filter(exp => exp.length > 0)
+    .filter(Boolean)
     .join("\n\n")
     .trim();
 
   return {
-    summary: combinedSummary,
-    explanation: combinedExplanation
+    summary: combinedSummary || "Could not generate a meaningful summary from the content.",
+    explanation: combinedExplanation || "Could not generate a detailed explanation from the content."
   };
 }
 
