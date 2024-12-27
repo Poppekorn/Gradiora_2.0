@@ -5,6 +5,7 @@ import { db } from "@db";
 import { boards, tiles } from "@db/schema";
 import { eq } from "drizzle-orm";
 import { optimizeSchedule } from "./optimizer";
+import Logger from "./utils/logger";
 
 export function registerRoutes(app: Express): Server {
   setupAuth(app);
@@ -12,20 +13,34 @@ export function registerRoutes(app: Express): Server {
   // Boards API
   app.get("/api/boards", async (req, res) => {
     if (!req.isAuthenticated()) {
+      Logger.warn("Unauthorized boards access attempt", {
+        ip: req.ip,
+        headers: req.headers,
+      });
       return res.status(401).send("Not authenticated");
     }
 
     try {
       const userBoards = await db.select().from(boards);
+      Logger.info("Boards retrieved successfully", {
+        count: userBoards.length,
+        userId: req.user?.id,
+      });
       res.json(userBoards);
     } catch (error) {
-      console.error("Error fetching boards:", error);
+      Logger.error("Error fetching boards", error as Error, {
+        userId: req.user?.id,
+      });
       res.status(500).send("Failed to fetch boards");
     }
   });
 
   app.post("/api/boards", async (req, res) => {
     if (!req.isAuthenticated()) {
+      Logger.warn("Unauthorized board creation attempt", {
+        ip: req.ip,
+        headers: req.headers,
+      });
       return res.status(401).send("Not authenticated");
     }
 
@@ -41,9 +56,16 @@ export function registerRoutes(app: Express): Server {
         })
         .returning();
 
+      Logger.info("Board created successfully", {
+        boardId: board.id,
+        userId: req.user?.id,
+      });
       res.json(board);
     } catch (error) {
-      console.error("Error creating board:", error);
+      Logger.error("Error creating board", error as Error, {
+        userId: req.user?.id,
+        payload: req.body,
+      });
       res.status(500).send("Failed to create board");
     }
   });
@@ -51,27 +73,54 @@ export function registerRoutes(app: Express): Server {
   // Tiles API
   app.get("/api/boards/:boardId/tiles", async (req, res) => {
     if (!req.isAuthenticated()) {
-      return res.status(401).send("Not authenticated");
-    }
-
-    const boardTiles = await db.query.tiles.findMany({
-      where: (tiles) => eq(tiles.boardId, parseInt(req.params.boardId)),
-    });
-
-    res.json(boardTiles);
-  });
-
-  app.post("/api/boards/:boardId/tiles", async (req, res) => {
-    if (!req.isAuthenticated()) {
+      Logger.warn("Unauthorized tiles access attempt", {
+        ip: req.ip,
+        headers: req.headers,
+        boardId: req.params.boardId,
+      });
       return res.status(401).send("Not authenticated");
     }
 
     try {
-      // Parse and validate the date
+      const boardTiles = await db.query.tiles.findMany({
+        where: (tiles) => eq(tiles.boardId, parseInt(req.params.boardId)),
+      });
+
+      Logger.info("Tiles retrieved successfully", {
+        boardId: req.params.boardId,
+        count: boardTiles.length,
+        userId: req.user?.id,
+      });
+      res.json(boardTiles);
+    } catch (error) {
+      Logger.error("Error fetching tiles", error as Error, {
+        userId: req.user?.id,
+        boardId: req.params.boardId,
+      });
+      res.status(500).send("Failed to fetch tiles");
+    }
+  });
+
+  app.post("/api/boards/:boardId/tiles", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      Logger.warn("Unauthorized tile creation attempt", {
+        ip: req.ip,
+        headers: req.headers,
+        boardId: req.params.boardId,
+      });
+      return res.status(401).send("Not authenticated");
+    }
+
+    try {
       let dueDate = null;
       if (req.body.dueDate) {
         dueDate = new Date(req.body.dueDate);
         if (isNaN(dueDate.getTime())) {
+          Logger.warn("Invalid due date format", {
+            dueDate: req.body.dueDate,
+            userId: req.user?.id,
+            boardId: req.params.boardId,
+          });
           return res.status(400).send("Invalid due date format");
         }
       }
@@ -90,9 +139,18 @@ export function registerRoutes(app: Express): Server {
         })
         .returning();
 
+      Logger.info("Tile created successfully", {
+        tileId: tile.id,
+        boardId: req.params.boardId,
+        userId: req.user?.id,
+      });
       res.json(tile);
     } catch (error) {
-      console.error("Error creating tile:", error);
+      Logger.error("Error creating tile", error as Error, {
+        userId: req.user?.id,
+        boardId: req.params.boardId,
+        payload: req.body,
+      });
       res.status(500).send("Failed to create tile");
     }
   });
@@ -100,13 +158,16 @@ export function registerRoutes(app: Express): Server {
   // Schedule Optimization API
   app.post("/api/boards/:boardId/optimize", async (req, res) => {
     if (!req.isAuthenticated()) {
+      Logger.warn("Unauthorized schedule optimization attempt", {
+        ip: req.ip,
+        headers: req.headers,
+        boardId: req.params.boardId,
+      });
       return res.status(401).send("Not authenticated");
     }
 
     try {
       const boardId = parseInt(req.params.boardId);
-
-      // Get the board and its tiles
       const [board] = await db
         .select()
         .from(boards)
@@ -114,6 +175,10 @@ export function registerRoutes(app: Express): Server {
         .limit(1);
 
       if (!board) {
+        Logger.warn("Board not found for optimization", {
+          boardId,
+          userId: req.user?.id,
+        });
         return res.status(404).send("Board not found");
       }
 
@@ -121,7 +186,12 @@ export function registerRoutes(app: Express): Server {
         where: (tiles) => eq(tiles.boardId, boardId),
       });
 
-      // Get the optimized schedule
+      Logger.info("Starting schedule optimization", {
+        boardId,
+        tilesCount: boardTiles.length,
+        userId: req.user?.id,
+      });
+
       const optimizedSchedule = await optimizeSchedule({
         tiles: boardTiles,
         board,
@@ -140,9 +210,18 @@ export function registerRoutes(app: Express): Server {
           .where(eq(tiles.id, schedule.tileId));
       }
 
+      Logger.info("Schedule optimization completed", {
+        boardId,
+        optimizedTilesCount: optimizedSchedule.length,
+        userId: req.user?.id,
+      });
+
       res.json(optimizedSchedule);
     } catch (error) {
-      console.error("Error in schedule optimization:", error);
+      Logger.error("Error in schedule optimization", error as Error, {
+        userId: req.user?.id,
+        boardId: req.params.boardId,
+      });
       res.status(500).send("Failed to optimize schedule");
     }
   });
