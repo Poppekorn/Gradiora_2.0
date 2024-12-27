@@ -61,30 +61,45 @@ async function manageQuota(userId: number, tokenCount: number) {
   const today = new Date();
   const resetDate = new Date(today.getFullYear(), today.getMonth() + 1, 1);
 
-  const [userQuota] = await db
-    .select()
-    .from(apiQuota)
-    .where(eq(apiQuota.userId, userId))
-    .limit(1);
+  try {
+    const [userQuota] = await db
+      .select()
+      .from(apiQuota)
+      .where(eq(apiQuota.userId, userId))
+      .limit(1);
 
-  if (!userQuota || new Date(userQuota.resetAt) < today) {
-    // Insert new quota or reset existing one
-    await db.insert(apiQuota).values({
-      userId,
-      tokenCount,
-      callCount: 1,
-      quotaLimit: 100000,
-      resetAt: resetDate,
-    });
-  } else {
-    // Update existing quota
-    await db.update(apiQuota)
-      .set({
-        tokenCount: userQuota.tokenCount + tokenCount,
-        callCount: userQuota.callCount + 1,
-        updatedAt: new Date()
-      })
-      .where(eq(apiQuota.userId, userId));
+    if (!userQuota || new Date(userQuota.resetAt) < today) {
+      // Insert new quota or reset existing one
+      const values = {
+        userId,
+        tokenCount,
+        callCount: 1,
+        quotaLimit: 100000,
+        resetAt: resetDate,
+        updatedAt: new Date(),
+      };
+
+      await db
+        .insert(apiQuota)
+        .values(values)
+        .onConflictDoUpdate({
+          target: apiQuota.userId,
+          set: values,
+        });
+    } else {
+      // Update existing quota
+      await db
+        .update(apiQuota)
+        .set({
+          tokenCount: userQuota.tokenCount + tokenCount,
+          callCount: userQuota.callCount + 1,
+          updatedAt: new Date(),
+        })
+        .where(eq(apiQuota.userId, userId));
+    }
+  } catch (error) {
+    Logger.error("Error managing quota:", { error, userId, tokenCount });
+    throw error;
   }
 }
 
@@ -95,20 +110,27 @@ async function processChunks(chunks: string[], userId: number, level: string): P
       messages: [
         {
           role: "system",
-          content: `You are an educational content summarizer for ${level} students. Create a clear, focused summary of the content followed by a detailed explanation. Focus exclusively on the main ideas, key points, and important concepts in the text. Do not mention anything about file formats, document structure, or technical details.
+          content: `You are a knowledgeable content summarizer for ${level} students. Create a clear, focused summary of the content's key points and main ideas, followed by a detailed explanation. 
 
 When summarizing:
-- Extract and present the core message and main points
-- Use clear, level-appropriate language
-- Organize information logically
-- Remove any technical metadata or format-related content`
+1. Focus on the actual content and its meaning
+2. Identify and highlight key information (e.g., pricing details, features, benefits)
+3. Structure the information logically (e.g., group related items together)
+4. Use clear, ${level}-appropriate language
+5. If the content includes lists or plans, maintain their structure in the summary
+
+Do not:
+- Include any technical formatting details
+- Mention document types or file formats
+- Include metadata or structural elements
+- Add information not present in the original content`
         },
         {
           role: "user",
           content: chunk
         }
       ],
-      temperature: 0.7,
+      temperature: 0.3, // Lower temperature for more focused summaries
       max_tokens: 800
     }));
 
@@ -119,6 +141,7 @@ When summarizing:
       throw new Error("Empty response from OpenAI");
     }
 
+    // Split response into summary and explanation
     const parts = result.split("\n\n");
     return {
       summary: parts[0] || '',
@@ -126,10 +149,15 @@ When summarizing:
     };
   }));
 
-  // Combine summaries more intelligently
-  const combinedSummary = summaries.map(s => s.summary).join("\n").trim();
-  const combinedExplanation = summaries.map(s => s.explanation)
-    .filter(exp => exp.length > 0) // Remove empty explanations
+  // Combine summaries intelligently
+  const combinedSummary = summaries
+    .map(s => s.summary)
+    .join("\n")
+    .trim();
+
+  const combinedExplanation = summaries
+    .map(s => s.explanation)
+    .filter(exp => exp.length > 0)
     .join("\n\n")
     .trim();
 
@@ -163,7 +191,7 @@ export async function getQuotaInfo(userId: number) {
 }
 
 export async function summarizeContent(content: string, level: string = 'high_school', userId: number, fileId: number): Promise<AnalysisResult> {
-  Logger.info("Summarizing content with OpenAI", { level, contentLength: content.length });
+  Logger.info("Summarizing content", { level, contentLength: content.length });
 
   if (!content.trim()) {
     throw new Error("Empty content provided for summarization");

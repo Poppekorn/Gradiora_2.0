@@ -82,7 +82,6 @@ export const tags = pgTable("tags", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-// Junction tables and tables with unique constraints
 export const fileTags = pgTable("file_tags", {
   id: serial("id").primaryKey(),
   fileId: integer("file_id").references(() => files.id).notNull(),
@@ -100,7 +99,7 @@ export const apiQuota = pgTable("api_quota", {
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => ({
-  userIdUnique: unique("user_id_unique").on(table.userId),
+  userIdUnique: unique().on(table.userId),
 }));
 
 export const fileSummaries = pgTable("file_summaries", {
@@ -112,7 +111,7 @@ export const fileSummaries = pgTable("file_summaries", {
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => ({
-  fileEducationUnique: unique("file_education_unique").on(table.fileId, table.educationLevel),
+  fileEducationUnique: unique().on(table.fileId, table.educationLevel),
 }));
 
 // Relations
