@@ -7,6 +7,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -53,10 +54,11 @@ export default function CreateBoardDialog({ children }: CreateBoardDialogProps) 
         color: "#E2E8F0",
       });
     } catch (error) {
+      console.error("Failed to create class:", error);
       toast({
         variant: "destructive",
         title: "Error",
-        description: "Failed to create class",
+        description: error instanceof Error ? error.message : "Failed to create class",
       });
     } finally {
       setLoading(false);
@@ -71,6 +73,9 @@ export default function CreateBoardDialog({ children }: CreateBoardDialogProps) 
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Create New Class</DialogTitle>
+          <DialogDescription>
+            Fill out the form below to create a new class. All fields marked with * are required.
+          </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
