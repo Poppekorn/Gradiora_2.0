@@ -1,0 +1,48 @@
+21:52:36.951 [INFO] POST /api/boards/7/files/12/summarize
+{
+  "method": "POST",
+  "url": "/api/boards/7/files/12/summarize",
+  "status": 500,
+  "duration": "789ms",
+  "ip": "172.31.196.59",
+  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+}
+21:52:41.635 [INFO] Starting file summarization
+{
+  "boardId": "7",
+  "fileId": "11",
+  "userId": 1
+}
+21:52:41.680 [INFO] Summarizing file content
+{
+  "fileId": "11",
+  "contentLength": 81741,
+  "educationLevel": "high_school"
+}
+21:52:41.680 [INFO] Summarizing content with OpenAI
+{
+  "level": "high_school",
+  "contentLength": 81741
+}
+21:52:41.680 [INFO] Content split into 29 chunks
+21:52:42.180 [ERROR] Error summarizing file
+{
+  "userId": 1,
+  "boardId": "7",
+  "fileId": "11",
+  "errorMessage": "there is no unique or exclusion constraint matching the ON CONFLICT specification",
+  "error": {
+    "message": "there is no unique or exclusion constraint matching the ON CONFLICT specification",
+    "stack": "error: there is no unique or exclusion constraint matching the ON CONFLICT specification\n    at file:///home/runner/StudyNexus/node_modules/@neondatabase/serverless/index.mjs:1345:74\n    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)\n    at async manageQuota (/home/runner/StudyNexus/server/services/openai.ts:71:5)\n    at async <anonymous> (/home/runner/StudyNexus/server/services/openai.ts:107:5)\n    at async Promise.all (index 17)\n    at async processChunks (/home/runner/StudyNexus/server/services/openai.ts:90:21)\n    at async summarizeContent (/home/runner/StudyNexus/server/services/openai.ts:137:18)\n    at async <anonymous> (/home/runner/StudyNexus/server/routes.ts:242:23)",
+    "name": "error"
+  }
+}
+21:52:42.181 [INFO] POST /api/boards/7/files/11/summarize
+{
+  "method": "POST",
+  "url": "/api/boards/7/files/11/summarize",
+  "status": 500,
+  "duration": "721ms",
+  "ip": "172.31.196.59",
+  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+}
