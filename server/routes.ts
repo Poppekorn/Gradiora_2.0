@@ -3,13 +3,12 @@ import { createServer, type Server } from "http";
 import { setupAuth } from "./auth";
 import { db } from "@db";
 import { boards, tiles, files, tags, fileTags } from "@db/schema";
-import { eq, and, sql } from "drizzle-orm";
-import { optimizeSchedule } from "./optimizer";
+import { eq, and } from "drizzle-orm";
 import Logger from "./utils/logger";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
-import { analyzeContent, generateQuiz, summarizeContent } from "./services/openai";
+import { summarizeContent } from "./services/openai";
 import { readFile } from "fs/promises";
 
 // Configure multer for file upload
@@ -608,46 +607,18 @@ export function registerRoutes(app: Express): Server {
         })
         .returning();
 
-      // Add tags to file directly using database query
+      // Add tags to file
       for (const tagId of selectedTags) {
-        try {
-          // Check if tag association already exists
-          const existingAssociation = await db.query.fileTags.findFirst({
-            where: (fileTags, { and, eq }) => and(
-              eq(fileTags.fileId, fileRecord.id),
-              eq(fileTags.tagId, tagId)
-            ),
-          });
-
-          if (!existingAssociation) {
-            await db
-              .insert(fileTags)
-              .values({
-                fileId: fileRecord.id,
-                tagId: tagId,
-              });
-          }
-        } catch (error) {
-          Logger.error("Error adding tag to file", error as Error, {
+        await db
+          .insert(fileTags)
+          .values({
             fileId: fileRecord.id,
             tagId: tagId,
-            boardId: req.params.boardId,
           });
-          // Continue with other tags even if one fails
-        }
       }
 
-      Logger.info("File uploaded successfully", {
-        fileId: fileRecord.id,
-        boardId: req.params.boardId,
-        userId: req.user?.id,
-      });
       res.json(fileRecord);
     } catch (error) {
-      Logger.error("Error uploading file", error as Error, {
-        userId: req.user?.id,
-        boardId: req.params.boardId,
-      });
       res.status(500).send("Failed to upload file");
     }
   });
@@ -674,17 +645,8 @@ export function registerRoutes(app: Express): Server {
         },
       });
 
-      Logger.info("Files retrieved successfully", {
-        boardId: req.params.boardId,
-        count: boardFiles.length,
-        userId: req.user?.id,
-      });
       res.json(boardFiles);
     } catch (error) {
-      Logger.error("Error fetching files", error as Error, {
-        userId: req.user?.id,
-        boardId: req.params.boardId,
-      });
       res.status(500).send("Failed to fetch files");
     }
   });
@@ -909,164 +871,8 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  // Analyze file endpoint (REPLACED)
-  app.post("/api/boards/:boardId/files/:fileId/analyze", async (req, res) => {
-    if (!req.isAuthenticated()) {
-      Logger.warn("Unauthorized file analysis attempt", {
-        ip: req.ip,
-        headers: req.headers,
-        boardId: req.params.boardId,
-        fileId: req.params.fileId,
-      });
-      return res.status(401).send("Not authenticated");
-    }
 
-    try {
-      Logger.info("Starting file analysis", {
-        boardId: req.params.boardId,
-        fileId: req.params.fileId,
-        userId: req.user?.id,
-      });
-
-      // Get file record
-      const [file] = await db
-        .select()
-        .from(files)
-        .where(eq(files.id, parseInt(req.params.fileId)))
-        .limit(1);
-
-      if (!file) {
-        Logger.warn("File not found for analysis", {
-          fileId: req.params.fileId,
-          boardId: req.params.boardId,
-        });
-        return res.status(404).send("File not found");
-      }
-
-      // Read file content
-      const filePath = path.join(process.cwd(), 'uploads', file.filename);
-      const content = await readFile(filePath, 'utf-8');
-
-      const educationLevel = req.body.educationLevel || 'high_school';
-
-      Logger.info("Analyzing file content", {
-        fileId: req.params.fileId,
-        contentLength: content.length,
-        educationLevel,
-      });
-
-      // Get analysis
-      const analysis = await analyzeContent(content, educationLevel);
-
-      Logger.info("File analyzed successfully", {
-        fileId: req.params.fileId,
-        boardId: req.params.boardId,
-        userId: req.user?.id,
-        educationLevel,
-      });
-
-      res.json(analysis);
-    } catch (error) {
-      Logger.error("Error analyzing file", error as Error, {
-        userId: req.user?.id,
-        boardId: req.params.boardId,
-        fileId: req.params.fileId,
-        errorMessage: (error as Error).message,
-      });
-
-      // Check if error is due to token limit or empty content
-      if ((error as Error).message.includes('Request too large')) {
-        return res.status(413).send("File is too large to analyze. Try breaking it into smaller sections.");
-      }
-
-      if ((error as Error).message.includes('Empty content')) {
-        return res.status(400).send("Cannot analyze empty file content");
-      }
-
-      res.status(500).send("Failed to analyze file");
-    }
-  });
-
-  // Generate quiz endpoint (REPLACED)
-  app.post("/api/boards/:boardId/files/:fileId/quiz", async (req, res) => {
-    if (!req.isAuthenticated()) {
-      Logger.warn("Unauthorized quiz generation attempt", {
-        ip: req.ip,
-        headers: req.headers,
-        boardId: req.params.boardId,
-        fileId: req.params.fileId,
-      });
-      return res.status(401).send("Not authenticated");
-    }
-
-    try {
-      Logger.info("Starting quiz generation", {
-        boardId: req.params.boardId,
-        fileId: req.params.fileId,
-        userId: req.user?.id,
-      });
-
-      // Get file record
-      const [file] = await db
-        .select()
-        .from(files)
-        .where(eq(files.id, parseInt(req.params.fileId)))
-        .limit(1);
-
-      if (!file) {
-        Logger.warn("File not found for quiz generation", {
-          fileId: req.params.fileId,
-          boardId: req.params.boardId,
-        });
-        return res.status(404).send("File not found");
-      }
-
-      // Read file content
-      const filePath = path.join(process.cwd(), 'uploads', file.filename);
-      const content = await readFile(filePath, 'utf-8');
-
-      const educationLevel = req.body.educationLevel || 'high_school';
-
-      Logger.info("Generating quiz from content", {
-        fileId: req.params.fileId,
-        contentLength: content.length,
-        educationLevel,
-      });
-
-      // Generate quiz
-      const quiz = await generateQuiz(content, educationLevel);
-
-      Logger.info("Quiz generated successfully", {
-        fileId: req.params.fileId,
-        boardId: req.params.boardId,
-        userId: req.user?.id,
-        educationLevel,
-        questionCount: quiz.questions.length,
-      });
-
-      res.json(quiz);
-    } catch (error) {
-      Logger.error("Error generating quiz", error as Error, {
-        userId: req.user?.id,
-        boardId: req.params.boardId,
-        fileId: req.params.fileId,
-        errorMessage: (error as Error).message,
-      });
-
-      // Check if error is due to token limit or empty content
-      if ((error as Error).message.includes('Request too large')) {
-        return res.status(413).send("File is too large for quiz generation. Try breaking it into smaller sections.");
-      }
-
-      if ((error as Error).message.includes('Empty content')) {
-        return res.status(400).send("Cannot generate quiz from empty file content");
-      }
-
-      res.status(500).send("Failed to generate quiz");
-    }
-  });
-
-  // Summarize endpoint (REPLACED)
+  // Summarize endpoint
   app.post("/api/boards/:boardId/files/:fileId/summarize", async (req, res) => {
     if (!req.isAuthenticated()) {
       Logger.warn("Unauthorized file summarization attempt", {
@@ -1131,7 +937,6 @@ export function registerRoutes(app: Express): Server {
         errorMessage: (error as Error).message,
       });
 
-      // Check if error is due to token limit or empty content
       if ((error as Error).message.includes('Request too large')) {
         return res.status(413).send("File is too large to summarize. Try breaking it into smaller sections.");
       }
@@ -1345,7 +1150,7 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  //New Summarize endpoint (REPLACED)
+  //New Summarize endpoint
   app.post("/api/boards/:boardId/files/:fileId/summarize", async (req, res) => {
     if (!req.isAuthenticated()) {
       Logger.warn("Unauthorized file summarization attempt", {

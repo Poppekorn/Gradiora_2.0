@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useFiles } from "@/hooks/use-files";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { File as FileIcon, Tag, Plus, Trash2, X, MoreVertical, Brain, BookOpen, GraduationCap, CheckSquare } from "lucide-react";
+import { File as FileIcon, Tag, Plus, Trash2, X, MoreVertical, BookOpen } from "lucide-react";
 import { format } from "date-fns";
 import type { File, Tag as TagType } from "@db/schema";
 import {
@@ -11,7 +11,6 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -54,24 +53,6 @@ interface FileWithTags extends Omit<File, 'createdAt'> {
   }[];
 }
 
-interface AIAnalysisResult {
-  summary: string;
-  explanation: string;
-  educationLevel?: string;
-}
-
-interface QuizQuestion {
-  question: string;
-  options: string[];
-  correctAnswer: string;
-  explanation: string;
-}
-
-interface QuizResult {
-  topic: string;
-  questions: QuizQuestion[];
-}
-
 interface SummaryResult {
   summary: string;
   explanation: string;
@@ -84,52 +65,9 @@ export default function FileList({ boardId }: FileListProps) {
   const [similarTagSuggestions, setSimilarTagSuggestions] = useState<string[]>([]);
   const { files, isLoading, tags, createTag, addTagToFile, removeTagFromFile, deleteFile } = useFiles(boardId);
   const { toast } = useToast();
-  const [showAnalysisDialog, setShowAnalysisDialog] = useState(false);
-  const [showQuizDialog, setShowQuizDialog] = useState(false);
-  const [selectedFiles, setSelectedFiles] = useState<number[]>([]);
-  const [analysisResult, setAnalysisResult] = useState<AIAnalysisResult | null>(null);
-  const [quizResult, setQuizResult] = useState<QuizResult | null>(null);
-  const [educationLevel, setEducationLevel] = useState("high_school");
   const [showSummaryDialog, setShowSummaryDialog] = useState(false);
   const [summaryResult, setSummaryResult] = useState<SummaryResult | null>(null);
-  const [quizCompleted, setQuizCompleted] = useState<number | null>(null);
-
-  const analyzeMutation = useMutation({
-    mutationFn: async (fileId: number) => {
-      const response = await fetch(`/api/boards/${boardId}/files/${fileId}/analyze`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ educationLevel }),
-        credentials: 'include',
-      });
-      if (!response.ok) throw new Error(await response.text());
-      return response.json();
-    },
-  });
-
-  const analyzeMultipleMutation = useMutation({
-    mutationFn: async (fileIds: number[]) => {
-      const response = await fetch(`/api/boards/${boardId}/files/analyze-multiple`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileIds, educationLevel }),
-        credentials: 'include',
-      });
-      if (!response.ok) throw new Error(await response.text());
-      return response.json();
-    },
-  });
-
-  const quizMutation = useMutation({
-    mutationFn: async (fileId: number) => {
-      const response = await fetch(`/api/boards/${boardId}/files/${fileId}/quiz`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-      if (!response.ok) throw new Error(await response.text());
-      return response.json();
-    },
-  });
+  const [educationLevel, setEducationLevel] = useState("high_school");
 
   const summaryMutation = useMutation({
     mutationFn: async (fileId: number) => {
@@ -143,48 +81,6 @@ export default function FileList({ boardId }: FileListProps) {
       return response.json();
     },
   });
-
-  const handleAnalyze = async (fileId: number) => {
-    try {
-      const result = await analyzeMutation.mutateAsync(fileId);
-      setAnalysisResult(result);
-      setShowAnalysisDialog(true);
-    } catch (error) {
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description: "Failed to analyze file",
-      });
-    }
-  };
-
-  const handleAnalyzeMultiple = async () => {
-    try {
-      const result = await analyzeMultipleMutation.mutateAsync(selectedFiles);
-      setAnalysisResult(result);
-      setShowAnalysisDialog(true);
-    } catch (error) {
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description: "Failed to analyze files",
-      });
-    }
-  };
-
-  const handleGenerateQuiz = async (fileId: number) => {
-    try {
-      const result = await quizMutation.mutateAsync(fileId);
-      setQuizResult(result);
-      setShowQuizDialog(true);
-    } catch (error) {
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description: "Failed to generate quiz",
-      });
-    }
-  };
 
   const handleSummarize = async (fileId: number) => {
     try {
@@ -206,7 +102,6 @@ export default function FileList({ boardId }: FileListProps) {
     try {
       const normalizedNewTag = normalizeTagName(newTagName);
 
-      // Check for exact matches
       const exactMatchExists = tags?.some(
         tag => normalizeTagName(tag.name) === normalizedNewTag
       );
@@ -220,19 +115,16 @@ export default function FileList({ boardId }: FileListProps) {
         return;
       }
 
-      // Find similar tags
       const similarTags = tags
         ? findSimilarTags(newTagName, tags.map(t => t.name))
         : [];
 
       if (similarTags.length > 0) {
-        // Show suggestion dialog
         setShowSuggestionDialog(true);
         setSimilarTagSuggestions(similarTags);
         return;
       }
 
-      // If no similar tags found, create the new tag
       const tag = await createTag({
         name: newTagName.trim(),
         isStudyUnitTag: false,
@@ -296,11 +188,6 @@ export default function FileList({ boardId }: FileListProps) {
     }
   };
 
-  const handleQuizComplete = async (fileId: number, score: number) => {
-    setQuizCompleted(fileId);
-    // You could save the quiz results here if needed
-  };
-
   if (isLoading) {
     return <div>Loading files...</div>;
   }
@@ -321,33 +208,6 @@ export default function FileList({ boardId }: FileListProps) {
   return (
     <>
       <div className="space-y-4">
-        {selectedFiles.length > 0 && (
-          <div className="flex items-center justify-between bg-muted p-4 rounded-lg">
-            <div className="flex items-center gap-2">
-              <CheckSquare className="h-4 w-4" />
-              <span>{selectedFiles.length} files selected</span>
-            </div>
-            <div className="flex items-center gap-4">
-              <Select value={educationLevel} onValueChange={setEducationLevel}>
-                <SelectTrigger className="w-[180px]">
-                  <SelectValue placeholder="Select level" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="elementary">Elementary School</SelectItem>
-                  <SelectItem value="middle">Middle School</SelectItem>
-                  <SelectItem value="high_school">High School</SelectItem>
-                  <SelectItem value="college">College</SelectItem>
-                  <SelectItem value="graduate">Graduate Level</SelectItem>
-                </SelectContent>
-              </Select>
-              <Button onClick={handleAnalyzeMultiple} disabled={analyzeMultipleMutation.isPending}>
-                <Brain className="mr-2 h-4 w-4" />
-                Analyze Together
-              </Button>
-            </div>
-          </div>
-        )}
-
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {files.map((file: FileWithTags) => (
             <Card
@@ -366,18 +226,6 @@ export default function FileList({ boardId }: FileListProps) {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      className="form-checkbox h-4 w-4"
-                      checked={selectedFiles.includes(file.id)}
-                      onChange={(e) => {
-                        setSelectedFiles(prev =>
-                          e.target.checked
-                            ? [...prev, file.id]
-                            : prev.filter(id => id !== file.id)
-                        );
-                      }}
-                    />
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon">
@@ -389,16 +237,6 @@ export default function FileList({ boardId }: FileListProps) {
                           <BookOpen className="mr-2 h-4 w-4" />
                           Summarize
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleGenerateQuiz(file.id)}>
-                          <GraduationCap className="mr-2 h-4 w-4" />
-                          Take Quiz
-                        </DropdownMenuItem>
-                        {quizCompleted === file.id && (
-                          <DropdownMenuItem onClick={() => handleAnalyze(file.id)}>
-                            <Brain className="mr-2 h-4 w-4" />
-                            Analyze Performance
-                          </DropdownMenuItem>
-                        )}
                         <DropdownMenuItem onClick={() => handleDeleteFile(file.id)} className="text-red-500">
                           <Trash2 className="mr-2 h-4 w-4" />
                           Delete
@@ -440,136 +278,6 @@ export default function FileList({ boardId }: FileListProps) {
           ))}
         </div>
       </div>
-
-      <Dialog open={showAnalysisDialog} onOpenChange={setShowAnalysisDialog}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>AI Analysis ({educationLevel.replace('_', ' ')})</DialogTitle>
-            <DialogDescription>
-              Here's what I found in the {selectedFiles.length > 1 ? 'files' : 'file'}
-            </DialogDescription>
-          </DialogHeader>
-          <ScrollArea className="max-h-[60vh]">
-            {analysisResult && (
-              <div className="space-y-6">
-                <div>
-                  <h3 className="text-lg font-semibold mb-2">Summary</h3>
-                  <p className="text-muted-foreground">{analysisResult.summary}</p>
-                </div>
-                <div>
-                  <h3 className="text-lg font-semibold mb-2">Detailed Explanation</h3>
-                  <p className="text-muted-foreground whitespace-pre-wrap">{analysisResult.explanation}</p>
-                </div>
-              </div>
-            )}
-          </ScrollArea>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={showQuizDialog} onOpenChange={setShowQuizDialog}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>Quiz</DialogTitle>
-            <DialogDescription>
-              Test your knowledge about {quizResult?.topic}
-            </DialogDescription>
-          </DialogHeader>
-          <ScrollArea className="max-h-[60vh]">
-            {quizResult && (
-              <div className="space-y-8">
-                {quizResult.questions.map((q, i) => (
-                  <div key={i} className="space-y-4">
-                    <h3 className="font-semibold">Question {i + 1}: {q.question}</h3>
-                    <div className="space-y-2">
-                      {q.options.map((option, j) => (
-                        <div key={j} className="flex items-center gap-2">
-                          <div className={`p-2 rounded ${option === q.correctAnswer ? 'bg-green-100 dark:bg-green-900' : ''}`}>
-                            {option}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                      <span className="font-medium">Explanation:</span> {q.explanation}
-                    </p>
-                  </div>
-                ))}
-                <Button 
-                  onClick={() => {
-                    if (quizResult) {
-                      handleQuizComplete(selectedFile?.id || 0, 0); // Add actual score calculation
-                      setShowQuizDialog(false);
-                    }
-                  }}
-                  className="mt-4"
-                >
-                  Complete Quiz
-                </Button>
-              </div>
-            )}
-          </ScrollArea>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={!!selectedFile} onOpenChange={(open) => !open && setSelectedFile(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Manage File Tags</DialogTitle>
-            <DialogDescription>
-              {selectedFile?.originalName}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            <div className="flex items-center gap-2">
-              <Input
-                placeholder="New tag name"
-                value={newTagName}
-                onChange={(e) => setNewTagName(e.target.value)}
-              />
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={handleCreateTag}
-                disabled={!newTagName.trim()}
-              >
-                <Plus className="h-4 w-4" />
-              </Button>
-            </div>
-
-            <div className="space-y-2">
-              <h4 className="font-medium">Available Tags</h4>
-              <div className="flex flex-wrap gap-2">
-                {tags?.map((tag) => {
-                  const hasTag = selectedFile?.tags?.some(t => t.tag.id === tag.id);
-                  return (
-                    <Badge
-                      key={tag.id}
-                      variant={hasTag ? "default" : "outline"}
-                      className={`cursor-pointer transition-colors ${hasTag && !tag.isStudyUnitTag ? 'pr-1' : ''}`}
-                      onClick={() => selectedFile && toggleTag(selectedFile.id, tag.id, !!hasTag)}
-                    >
-                      {tag.name}
-                      {tag.isStudyUnitTag && " (Study Unit)"}
-                      {hasTag && !tag.isStudyUnitTag && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            selectedFile && toggleTag(selectedFile.id, tag.id, true);
-                          }}
-                          className="ml-1 hover:text-destructive"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      )}
-                    </Badge>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={showSummaryDialog} onOpenChange={setShowSummaryDialog}>
         <DialogContent className="max-w-3xl">
