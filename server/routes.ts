@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { setupAuth } from "./auth";
 import { db } from "@db";
 import { boards, tiles, files, tags, fileTags } from "@db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { optimizeSchedule } from "./optimizer";
 import Logger from "./utils/logger";
 import multer from "multer";
@@ -563,17 +563,32 @@ export function registerRoutes(app: Express): Server {
         })
         .returning();
 
-      // Add tags to file using the new endpoint
+      // Add tags to file directly using database query
       for (const tagId of selectedTags) {
         try {
-          await axios.post(`/api/boards/${req.params.boardId}/files/${fileRecord.id}/tags/${tagId}`, {}, {
-            headers: {
-              Authorization: req.headers.authorization // Pass authorization headers
-            }
+          // Check if tag association already exists
+          const existingAssociation = await db.query.fileTags.findFirst({
+            where: (fileTags, { and, eq }) => and(
+              eq(fileTags.fileId, fileRecord.id),
+              eq(fileTags.tagId, tagId)
+            ),
           });
+
+          if (!existingAssociation) {
+            await db
+              .insert(fileTags)
+              .values({
+                fileId: fileRecord.id,
+                tagId: tagId,
+              });
+          }
         } catch (error) {
-          Logger.error(`Error adding tag ${tagId} to file ${fileRecord.id}`, error)
-          // Consider a strategy for handling failed tag additions - rollback, partial success, etc.
+          Logger.error("Error adding tag to file", error as Error, {
+            fileId: fileRecord.id,
+            tagId: tagId,
+            boardId: req.params.boardId,
+          });
+          // Continue with other tags even if one fails
         }
       }
 

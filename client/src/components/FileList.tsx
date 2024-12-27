@@ -31,9 +31,23 @@ interface FileListProps {
   boardId: number;
 }
 
-interface FileWithTags extends File {
+interface FileWithTags {
+  id: number;
+  filename: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+  boardId: number;
+  uploadedBy: number;
+  createdAt: string;
   tags: {
-    tag: TagType;
+    tag: {
+      id: number;
+      name: string;
+      boardId: number;
+      isStudyUnitTag: boolean;
+      createdAt: string;
+    };
   }[];
 }
 
