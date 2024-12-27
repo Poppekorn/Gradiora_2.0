@@ -200,7 +200,7 @@ export default function FileList({ boardId }: FileListProps) {
                   {file.tags?.map(({ tag }) => (
                     <Badge 
                       key={tag.id} 
-                      variant="secondary"
+                      variant={tag.isStudyUnitTag ? "secondary" : "default"}
                       className="flex items-center gap-1"
                     >
                       {tag.name}
@@ -260,7 +260,7 @@ export default function FileList({ boardId }: FileListProps) {
                     <Badge
                       key={tag.id}
                       variant={hasTag ? "default" : "outline"}
-                      className={`cursor-pointer ${hasTag && !tag.isStudyUnitTag ? 'pr-1' : ''}`}
+                      className={`cursor-pointer transition-colors ${hasTag && !tag.isStudyUnitTag ? 'pr-1' : ''}`}
                       onClick={() => selectedFile && toggleTag(selectedFile.id, tag.id, !!hasTag)}
                     >
                       {tag.name}
