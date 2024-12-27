@@ -49,6 +49,10 @@ export async function analyzeContent(content: string, level: string = 'high_scho
   try {
     Logger.info("Analyzing content with OpenAI", { level, contentLength: content.length });
 
+    if (!content.trim()) {
+      throw new Error("Empty content provided for analysis");
+    }
+
     // Split content into smaller chunks
     const chunks = chunkText(content);
     Logger.info(`Content split into ${chunks.length} chunks`);
@@ -74,6 +78,12 @@ export async function analyzeContent(content: string, level: string = 'high_scho
           response_format: { type: "json_object" }
         });
 
+        Logger.info("OpenAI response received", {
+          status: 'success',
+          chunkLength: chunk.length,
+          responseLength: response.choices[0].message?.content?.length
+        });
+
         const result = response.choices[0].message?.content;
         if (!result) {
           throw new Error("Empty response from OpenAI");
@@ -83,7 +93,10 @@ export async function analyzeContent(content: string, level: string = 'high_scho
         analyses.push(parsed);
 
       } catch (error) {
-        Logger.error("Error analyzing chunk", error as Error);
+        Logger.error("Error analyzing chunk", error as Error, {
+          chunkLength: chunk.length,
+          errorMessage: (error as Error).message
+        });
         throw error;
       }
     }
@@ -94,7 +107,7 @@ export async function analyzeContent(content: string, level: string = 'high_scho
       messages: [
         {
           role: "system",
-          content: `You are an expert study assistant. Create a comprehensive summary combining the following analyses into a cohesive explanation tailored for ${level} level students. Return a JSON response.`
+          content: `You are an expert study assistant. Create a comprehensive summary combining the following analyses into a cohesive explanation tailored for ${level} level students. Return a JSON response with format: { "summary": "brief overview", "explanation": "detailed explanation" }`
         },
         {
           role: "user",
@@ -110,10 +123,19 @@ export async function analyzeContent(content: string, level: string = 'high_scho
       throw new Error("Empty response from OpenAI");
     }
 
+    Logger.info("Final analysis completed", {
+      analysesCount: analyses.length,
+      finalResponseLength: finalResult.length
+    });
+
     return JSON.parse(finalResult) as AnalysisResult;
 
   } catch (error) {
-    Logger.error("Error analyzing content with OpenAI", error as Error);
+    Logger.error("Error analyzing content with OpenAI", error as Error, {
+      contentLength: content.length,
+      level,
+      errorMessage: (error as Error).message
+    });
     throw new Error("Failed to analyze content: " + (error as Error).message);
   }
 }
@@ -121,6 +143,10 @@ export async function analyzeContent(content: string, level: string = 'high_scho
 export async function generateQuiz(content: string, level: string = 'high_school'): Promise<QuizResult> {
   try {
     Logger.info("Generating quiz with OpenAI", { level, contentLength: content.length });
+
+    if (!content.trim()) {
+      throw new Error("Empty content provided for quiz generation");
+    }
 
     // Split content into smaller chunks
     const chunks = chunkText(content);
@@ -146,13 +172,21 @@ export async function generateQuiz(content: string, level: string = 'high_school
           temperature: 0.7
         });
 
+        Logger.info("Key points extraction completed", {
+          status: 'success',
+          chunkLength: chunk.length
+        });
+
         const result = response.choices[0].message?.content;
         if (result) {
           keyPoints.push(result);
         }
 
       } catch (error) {
-        Logger.error("Error extracting key points", error as Error);
+        Logger.error("Error extracting key points", error as Error, {
+          chunkLength: chunk.length,
+          errorMessage: (error as Error).message
+        });
         throw error;
       }
     }
@@ -163,18 +197,7 @@ export async function generateQuiz(content: string, level: string = 'high_school
       messages: [
         {
           role: "system",
-          content: `Create a quiz based on these key points, suitable for ${level} level students. Include a mix of conceptual and factual questions. Return a JSON object with format:
-          {
-            "topic": "Main topic",
-            "questions": [
-              {
-                "question": "Question text",
-                "options": ["Option 1", "Option 2", "Option 3", "Option 4"],
-                "correctAnswer": "Correct option",
-                "explanation": "Why this is correct"
-              }
-            ]
-          }`
+          content: `Create a quiz based on these key points, suitable for ${level} level students. Include a mix of conceptual and factual questions. Return a JSON object with format: { "topic": "main topic", "questions": [{ "question": "text", "options": ["option1", "option2", "option3", "option4"], "correctAnswer": "correct option", "explanation": "explanation" }] }`
         },
         {
           role: "user",
@@ -190,56 +213,30 @@ export async function generateQuiz(content: string, level: string = 'high_school
       throw new Error("Empty response from OpenAI");
     }
 
+    Logger.info("Quiz generation completed", {
+      keyPointsCount: keyPoints.length,
+      responseLength: result.length
+    });
+
     return JSON.parse(result) as QuizResult;
 
   } catch (error) {
-    Logger.error("Error generating quiz with OpenAI", error as Error);
-    throw new Error("Failed to generate quiz: " + (error as Error).message);
-  }
-}
-
-export async function analyzeMultipleContents(contents: string[], level: string = 'high_school'): Promise<AnalysisResult> {
-  try {
-    Logger.info("Analyzing multiple contents with OpenAI", { level, contentCount: contents.length });
-
-    // Analyze each content separately first
-    const individualAnalyses = await Promise.all(contents.map(async (content) => {
-      return await analyzeContent(content, level);
-    }));
-
-    // Combine analyses into a unified summary
-    const response = await openai.chat.completions.create({
-      model: "gpt-4",
-      messages: [
-        {
-          role: "system",
-          content: `Create a unified analysis combining these separate analyses into a cohesive summary suitable for ${level} level students. Return a JSON response with a summary and detailed explanation that connects the key concepts across all documents.`
-        },
-        {
-          role: "user",
-          content: JSON.stringify(individualAnalyses)
-        }
-      ],
-      temperature: 0.7,
-      response_format: { type: "json_object" }
+    Logger.error("Error generating quiz with OpenAI", error as Error, {
+      contentLength: content.length,
+      level,
+      errorMessage: (error as Error).message
     });
-
-    const result = response.choices[0].message?.content;
-    if (!result) {
-      throw new Error("Empty response from OpenAI");
-    }
-
-    return JSON.parse(result) as AnalysisResult;
-
-  } catch (error) {
-    Logger.error("Error analyzing multiple contents with OpenAI", error as Error);
-    throw new Error("Failed to analyze multiple contents: " + (error as Error).message);
+    throw new Error("Failed to generate quiz: " + (error as Error).message);
   }
 }
 
 export async function summarizeContent(content: string, level: string = 'high_school'): Promise<AnalysisResult> {
   try {
     Logger.info("Summarizing content with OpenAI", { level, contentLength: content.length });
+
+    if (!content.trim()) {
+      throw new Error("Empty content provided for summarization");
+    }
 
     const chunks = chunkText(content);
     Logger.info(`Content split into ${chunks.length} chunks`);
@@ -253,38 +250,56 @@ export async function summarizeContent(content: string, level: string = 'high_sc
           messages: [
             {
               role: "system",
-              content: `You are a skilled educator. Create a clear summary of the following content tailored for ${level} level students. Include both a brief overview and a more detailed explanation.`
+              content: `You are a skilled educator. Create a clear summary of the following content tailored for ${level} level students. Return a JSON response with format: { "summary": "brief overview", "explanation": "detailed explanation" }`
             },
             {
               role: "user",
               content: chunk
             }
           ],
-          temperature: 0.7
+          temperature: 0.7,
+          response_format: { type: "json_object" }
+        });
+
+        Logger.info("Chunk summarization completed", {
+          status: 'success',
+          chunkLength: chunk.length
         });
 
         const result = response.choices[0].message?.content;
-        if (result) {
-          summaries.push({
-            summary: result.split('\n\n')[0] || '',
-            explanation: result.split('\n\n').slice(1).join('\n\n') || ''
-          });
+        if (!result) {
+          throw new Error("Empty response from OpenAI");
         }
+
+        const parsed = JSON.parse(result) as AnalysisResult;
+        summaries.push(parsed);
       } catch (error) {
-        Logger.error("Error summarizing chunk", error as Error);
+        Logger.error("Error summarizing chunk", error as Error, {
+          chunkLength: chunk.length,
+          errorMessage: (error as Error).message
+        });
         throw error;
       }
     }
 
-    // Combine all summaries
+    // Combine all summaries into a final summary
     const combinedSummary = {
-      summary: summaries.map(s => s.summary).join('\n'),
-      explanation: summaries.map(s => s.explanation).join('\n\n')
+      summary: summaries.map(s => s.summary).join('\n').trim(),
+      explanation: summaries.map(s => s.explanation).join('\n\n').trim()
     };
+
+    Logger.info("Summarization completed", {
+      chunksProcessed: chunks.length,
+      totalSummariesGenerated: summaries.length
+    });
 
     return combinedSummary;
   } catch (error) {
-    Logger.error("Error summarizing content with OpenAI", error as Error);
+    Logger.error("Error summarizing content with OpenAI", error as Error, {
+      contentLength: content.length,
+      level,
+      errorMessage: (error as Error).message
+    });
     throw new Error("Failed to summarize content: " + (error as Error).message);
   }
 }

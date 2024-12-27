@@ -9,9 +9,8 @@ import Logger from "./utils/logger";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
-import { analyzeContent, generateQuiz, analyzeMultipleContents, summarizeContent } from "./services/openai"; // Added summarizeContent import
+import { analyzeContent, generateQuiz, summarizeContent } from "./services/openai";
 import { readFile } from "fs/promises";
-
 
 // Configure multer for file upload
 const storage = multer.diskStorage({
@@ -28,7 +27,7 @@ const storage = multer.diskStorage({
   }
 });
 
-const upload = multer({ 
+const upload = multer({
   storage: storage,
   limits: {
     fileSize: 50 * 1024 * 1024 // 50MB limit
@@ -910,7 +909,7 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  // Analyze single file
+  // Analyze file endpoint (REPLACED)
   app.post("/api/boards/:boardId/files/:fileId/analyze", async (req, res) => {
     if (!req.isAuthenticated()) {
       Logger.warn("Unauthorized file analysis attempt", {
@@ -923,6 +922,12 @@ export function registerRoutes(app: Express): Server {
     }
 
     try {
+      Logger.info("Starting file analysis", {
+        boardId: req.params.boardId,
+        fileId: req.params.fileId,
+        userId: req.user?.id,
+      });
+
       // Get file record
       const [file] = await db
         .select()
@@ -931,6 +936,10 @@ export function registerRoutes(app: Express): Server {
         .limit(1);
 
       if (!file) {
+        Logger.warn("File not found for analysis", {
+          fileId: req.params.fileId,
+          boardId: req.params.boardId,
+        });
         return res.status(404).send("File not found");
       }
 
@@ -939,6 +948,12 @@ export function registerRoutes(app: Express): Server {
       const content = await readFile(filePath, 'utf-8');
 
       const educationLevel = req.body.educationLevel || 'high_school';
+
+      Logger.info("Analyzing file content", {
+        fileId: req.params.fileId,
+        contentLength: content.length,
+        educationLevel,
+      });
 
       // Get analysis
       const analysis = await analyzeContent(content, educationLevel);
@@ -953,21 +968,26 @@ export function registerRoutes(app: Express): Server {
       res.json(analysis);
     } catch (error) {
       Logger.error("Error analyzing file", error as Error, {
-        userId: requser?.id,
+        userId: req.user?.id,
         boardId: req.params.boardId,
         fileId: req.params.fileId,
+        errorMessage: (error as Error).message,
       });
 
-      // Check if error is due to token limit
+      // Check if error is due to token limit or empty content
       if ((error as Error).message.includes('Request too large')) {
         return res.status(413).send("File is too large to analyze. Try breaking it into smaller sections.");
+      }
+
+      if ((error as Error).message.includes('Empty content')) {
+        return res.status(400).send("Cannot analyze empty file content");
       }
 
       res.status(500).send("Failed to analyze file");
     }
   });
 
-  // Generate quiz from file
+  // Generate quiz endpoint (REPLACED)
   app.post("/api/boards/:boardId/files/:fileId/quiz", async (req, res) => {
     if (!req.isAuthenticated()) {
       Logger.warn("Unauthorized quiz generation attempt", {
@@ -980,6 +1000,12 @@ export function registerRoutes(app: Express): Server {
     }
 
     try {
+      Logger.info("Starting quiz generation", {
+        boardId: req.params.boardId,
+        fileId: req.params.fileId,
+        userId: req.user?.id,
+      });
+
       // Get file record
       const [file] = await db
         .select()
@@ -988,6 +1014,10 @@ export function registerRoutes(app: Express): Server {
         .limit(1);
 
       if (!file) {
+        Logger.warn("File not found for quiz generation", {
+          fileId: req.params.fileId,
+          boardId: req.params.boardId,
+        });
         return res.status(404).send("File not found");
       }
 
@@ -997,6 +1027,12 @@ export function registerRoutes(app: Express): Server {
 
       const educationLevel = req.body.educationLevel || 'high_school';
 
+      Logger.info("Generating quiz from content", {
+        fileId: req.params.fileId,
+        contentLength: content.length,
+        educationLevel,
+      });
+
       // Generate quiz
       const quiz = await generateQuiz(content, educationLevel);
 
@@ -1005,6 +1041,7 @@ export function registerRoutes(app: Express): Server {
         boardId: req.params.boardId,
         userId: req.user?.id,
         educationLevel,
+        questionCount: quiz.questions.length,
       });
 
       res.json(quiz);
@@ -1013,14 +1050,97 @@ export function registerRoutes(app: Express): Server {
         userId: req.user?.id,
         boardId: req.params.boardId,
         fileId: req.params.fileId,
+        errorMessage: (error as Error).message,
       });
 
-      // Check if error is due to token limit
+      // Check if error is due to token limit or empty content
       if ((error as Error).message.includes('Request too large')) {
         return res.status(413).send("File is too large for quiz generation. Try breaking it into smaller sections.");
       }
 
+      if ((error as Error).message.includes('Empty content')) {
+        return res.status(400).send("Cannot generate quiz from empty file content");
+      }
+
       res.status(500).send("Failed to generate quiz");
+    }
+  });
+
+  // Summarize endpoint (REPLACED)
+  app.post("/api/boards/:boardId/files/:fileId/summarize", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      Logger.warn("Unauthorized file summarization attempt", {
+        ip: req.ip,
+        headers: req.headers,
+        boardId: req.params.boardId,
+        fileId: req.params.fileId,
+      });
+      return res.status(401).send("Not authenticated");
+    }
+
+    try {
+      Logger.info("Starting file summarization", {
+        boardId: req.params.boardId,
+        fileId: req.params.fileId,
+        userId: req.user?.id,
+      });
+
+      // Get file record
+      const [file] = await db
+        .select()
+        .from(files)
+        .where(eq(files.id, parseInt(req.params.fileId)))
+        .limit(1);
+
+      if (!file) {
+        Logger.warn("File not found for summarization", {
+          fileId: req.params.fileId,
+          boardId: req.params.boardId,
+        });
+        return res.status(404).send("File not found");
+      }
+
+      // Read file content
+      const filePath = path.join(process.cwd(), 'uploads', file.filename);
+      const content = await readFile(filePath, 'utf-8');
+
+      const educationLevel = req.body.educationLevel || 'high_school';
+
+      Logger.info("Summarizing file content", {
+        fileId: req.params.fileId,
+        contentLength: content.length,
+        educationLevel,
+      });
+
+      // Get summary
+      const summary = await summarizeContent(content, educationLevel);
+
+      Logger.info("File summarized successfully", {
+        fileId: req.params.fileId,
+        boardId: req.params.boardId,
+        userId: req.user?.id,
+        educationLevel,
+      });
+
+      res.json(summary);
+    } catch (error) {
+      Logger.error("Error summarizing file", error as Error, {
+        userId: req.user?.id,
+        boardId: req.params.boardId,
+        fileId: req.params.fileId,
+        errorMessage: (error as Error).message,
+      });
+
+      // Check if error is due to token limit or empty content
+      if ((error as Error).message.includes('Request too large')) {
+        return res.status(413).send("File is too large to summarize. Try breaking it into smaller sections.");
+      }
+
+      if ((error as Error).message.includes('Empty content')) {
+        return res.status(400).send("Cannot summarize empty file content");
+      }
+
+      res.status(500).send("Failed to summarize file");
     }
   });
 
@@ -1052,7 +1172,7 @@ export function registerRoutes(app: Express): Server {
 
       // Get files associated with this study unit via tags
       const studyUnitFiles = await db.query.files.findMany({
-        where: (files, { exists, and, eq }) => 
+        where: (files, { exists, and, eq }) =>
           exists(
             db.select()
               .from(fileTags)
@@ -1088,7 +1208,7 @@ export function registerRoutes(app: Express): Server {
       );
 
       // Get combined analysis with specified education level
-      const analysis = await analyzeMultipleContents(contents, level as string);
+      const analysis = await analyzeContent(contents.join('\n\n--- Next Document ---\n\n'), level as string);
 
       // Update the tile with the analysis results
       await db
@@ -1153,7 +1273,7 @@ export function registerRoutes(app: Express): Server {
 
       // Get files associated with this study unit via tags
       const studyUnitFiles = await db.query.files.findMany({
-        where: (files, { exists, and, eq }) => 
+        where: (files, { exists, and, eq }) =>
           exists(
             db.select()
               .from(fileTags)
@@ -1225,7 +1345,7 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  //New Summarize endpoint
+  //New Summarize endpoint (REPLACED)
   app.post("/api/boards/:boardId/files/:fileId/summarize", async (req, res) => {
     if (!req.isAuthenticated()) {
       Logger.warn("Unauthorized file summarization attempt", {
@@ -1238,6 +1358,12 @@ export function registerRoutes(app: Express): Server {
     }
 
     try {
+      Logger.info("Starting file summarization", {
+        boardId: req.params.boardId,
+        fileId: req.params.fileId,
+        userId: req.user?.id,
+      });
+
       // Get file record
       const [file] = await db
         .select()
@@ -1246,6 +1372,10 @@ export function registerRoutes(app: Express): Server {
         .limit(1);
 
       if (!file) {
+        Logger.warn("File not found for summarization", {
+          fileId: req.params.fileId,
+          boardId: req.params.boardId,
+        });
         return res.status(404).send("File not found");
       }
 
@@ -1254,6 +1384,12 @@ export function registerRoutes(app: Express): Server {
       const content = await readFile(filePath, 'utf-8');
 
       const educationLevel = req.body.educationLevel || 'high_school';
+
+      Logger.info("Summarizing file content", {
+        fileId: req.params.fileId,
+        contentLength: content.length,
+        educationLevel,
+      });
 
       // Get summary
       const summary = await summarizeContent(content, educationLevel);
@@ -1271,11 +1407,16 @@ export function registerRoutes(app: Express): Server {
         userId: req.user?.id,
         boardId: req.params.boardId,
         fileId: req.params.fileId,
+        errorMessage: (error as Error).message,
       });
 
-      // Check if error is due to token limit
+      // Check if error is due to token limit or empty content
       if ((error as Error).message.includes('Request too large')) {
         return res.status(413).send("File is too large to summarize. Try breaking it into smaller sections.");
+      }
+
+      if ((error as Error).message.includes('Empty content')) {
+        return res.status(400).send("Cannot summarize empty file content");
       }
 
       res.status(500).send("Failed to summarize file");
