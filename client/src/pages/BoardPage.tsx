@@ -1,7 +1,8 @@
 import { useRoute } from "wouter";
-import { Plus, ArrowLeft } from "lucide-react";
+import { Plus, ArrowLeft, Sparkles } from "lucide-react";
 import { useTiles } from "@/hooks/use-tiles";
 import { useBoards } from "@/hooks/use-boards";
+import { useOptimizeSchedule } from "@/hooks/use-optimize-schedule";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import TileCard from "@/components/TileCard";
@@ -14,7 +15,8 @@ export default function BoardPage() {
   const boardId = parseInt(params?.id || "0");
   const { boards } = useBoards();
   const { tiles, isLoading } = useTiles(boardId);
-  
+  const { optimizeSchedule, isOptimizing } = useOptimizeSchedule(boardId);
+
   const board = boards?.find(b => b.id === boardId);
 
   if (!board) {
@@ -49,6 +51,14 @@ export default function BoardPage() {
               <p className="text-muted-foreground">Prof. {board.professor}</p>
             )}
           </div>
+          <Button
+            variant="outline"
+            onClick={() => optimizeSchedule()}
+            disabled={isOptimizing || tiles?.length === 0}
+          >
+            <Sparkles className="mr-2 h-4 w-4" />
+            {isOptimizing ? "Optimizing..." : "Optimize Schedule"}
+          </Button>
           <CreateTileDialog boardId={boardId}>
             <Button>
               <Plus className="mr-2 h-4 w-4" />

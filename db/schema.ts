@@ -8,6 +8,13 @@ export const users = pgTable("users", {
   password: text("password").notNull(),
   organizationId: integer("organization_id").references(() => organizations.id),
   createdAt: timestamp("created_at").defaultNow(),
+  studyPreferences: jsonb("study_preferences").default({
+    preferredStudyTime: "morning",
+    studySessionDuration: 25,
+    breakDuration: 5,
+    dailyStudyGoal: 120,
+    focusLevel: "medium"
+  }),
 });
 
 export const organizations = pgTable("organizations", {
@@ -27,6 +34,9 @@ export const boards = pgTable("boards", {
   isArchived: boolean("is_archived").default(false),
   organizationId: integer("organization_id").references(() => organizations.id),
   createdAt: timestamp("created_at").defaultNow(),
+  difficulty: text("difficulty").default("medium"),
+  estimatedStudyHours: integer("estimated_study_hours"),
+  recommendedSessionDuration: integer("recommended_session_duration"),
 });
 
 export const tiles = pgTable("tiles", {
@@ -43,8 +53,26 @@ export const tiles = pgTable("tiles", {
   notes: text("notes"),
   boardId: integer("board_id").references(() => boards.id),
   createdAt: timestamp("created_at").defaultNow(),
+  estimatedDuration: integer("estimated_duration"),
+  actualDuration: integer("actual_duration"),
+  complexity: text("complexity").default("medium"),
+  recommendedTimeOfDay: text("recommended_time_of_day"),
+  optimalStudyOrder: integer("optimal_study_order"),
 });
 
+export const studySessions = pgTable("study_sessions", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id),
+  tileId: integer("tile_id").references(() => tiles.id),
+  startTime: timestamp("start_time").notNull(),
+  endTime: timestamp("end_time"),
+  duration: integer("duration"),
+  productivityScore: integer("productivity_score"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Relations
 export const organizationsRelations = relations(organizations, ({ many }) => ({
   users: many(users),
   boards: many(boards),
@@ -62,6 +90,17 @@ export const tilesRelations = relations(tiles, ({ one }) => ({
   board: one(boards, {
     fields: [tiles.boardId],
     references: [boards.id],
+  }),
+}));
+
+export const studySessionsRelations = relations(studySessions, ({ one }) => ({
+  user: one(users, {
+    fields: [studySessions.userId],
+    references: [users.id],
+  }),
+  tile: one(tiles, {
+    fields: [studySessions.tileId],
+    references: [tiles.id],
   }),
 }));
 
@@ -85,6 +124,11 @@ export const insertTileSchema = createInsertSchema(tiles);
 export const selectTileSchema = createSelectSchema(tiles);
 export type Tile = typeof tiles.$inferSelect;
 export type NewTile = typeof tiles.$inferInsert;
+
+export const insertStudySessionSchema = createInsertSchema(studySessions);
+export const selectStudySessionSchema = createSelectSchema(studySessions);
+export type StudySession = typeof studySessions.$inferSelect;
+export type NewStudySession = typeof studySessions.$inferInsert;
 
 // Aliases for backward compatibility
 export type InsertUser = NewUser;

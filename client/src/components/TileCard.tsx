@@ -1,7 +1,7 @@
 import { type Tile } from "@db/schema";
 import { Card, CardHeader, CardContent, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Calendar, Link as LinkIcon, Star, Tag } from "lucide-react";
+import { Calendar, Link as LinkIcon, Star, Tag, Clock, ListOrdered } from "lucide-react";
 import { format } from "date-fns";
 
 interface BoardCardProps {
@@ -62,6 +62,21 @@ export default function TileCard({ tile }: BoardCardProps) {
               <Badge className={priorityColors[tile.priority as keyof typeof priorityColors]}>
                 {tile.priority}
               </Badge>
+            </div>
+          )}
+
+          {tile.recommendedTimeOfDay && (
+            <div className="flex items-center text-sm">
+              <Clock className="mr-2 h-4 w-4" />
+              Recommended: {tile.recommendedTimeOfDay}
+              {tile.estimatedDuration && ` (${tile.estimatedDuration} min)`}
+            </div>
+          )}
+
+          {tile.optimalStudyOrder !== null && tile.optimalStudyOrder !== undefined && (
+            <div className="flex items-center text-sm">
+              <ListOrdered className="mr-2 h-4 w-4" />
+              Study Order: {tile.optimalStudyOrder + 1}
             </div>
           )}
 
