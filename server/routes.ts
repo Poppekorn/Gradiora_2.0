@@ -657,6 +657,11 @@ export function registerRoutes(app: Express): Server {
 
     try {
       const normalizedName = req.body.name.trim();
+      Logger.info("Attempting to create/find tag", {
+        boardId: req.params.boardId,
+        normalizedName,
+        userId: req.user?.id,
+      });
 
       // Check for existing tag with normalized name comparison
       const [existingTag] = await db
@@ -710,10 +715,24 @@ export function registerRoutes(app: Express): Server {
   // Add tag to file endpoint
   app.post("/api/boards/:boardId/files/:fileId/tags/:tagId", async (req, res) => {
     if (!req.isAuthenticated()) {
+      Logger.warn("Unauthorized tag addition attempt", {
+        ip: req.ip,
+        headers: req.headers,
+        boardId: req.params.boardId,
+        fileId: req.params.fileId,
+        tagId: req.params.tagId,
+      });
       return res.status(401).send("Not authenticated");
     }
 
     try {
+      Logger.info("Attempting to add tag to file", {
+        fileId: req.params.fileId,
+        tagId: req.params.tagId,
+        boardId: req.params.boardId,
+        userId: req.user?.id,
+      });
+
       // Check if the association already exists
       const existingAssociation = await db.query.fileTags.findFirst({
         where: (fileTags, { and, eq }) => and(
@@ -723,6 +742,11 @@ export function registerRoutes(app: Express): Server {
       });
 
       if (existingAssociation) {
+        Logger.info("Tag association already exists", {
+          fileId: req.params.fileId,
+          tagId: req.params.tagId,
+          boardId: req.params.boardId,
+        });
         return res.json(existingAssociation);
       }
 
@@ -749,6 +773,64 @@ export function registerRoutes(app: Express): Server {
         tagId: req.params.tagId,
       });
       res.status(500).send("Failed to add tag to file");
+    }
+  });
+
+  // Remove tag from file endpoint
+  app.delete("/api/boards/:boardId/files/:fileId/tags/:tagId", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      Logger.warn("Unauthorized tag removal attempt", {
+        ip: req.ip,
+        headers: req.headers,
+        boardId: req.params.boardId,
+        fileId: req.params.fileId,
+        tagId: req.params.tagId,
+      });
+      return res.status(401).send("Not authenticated");
+    }
+
+    try {
+      Logger.info("Attempting to remove tag from file", {
+        fileId: req.params.fileId,
+        tagId: req.params.tagId,
+        boardId: req.params.boardId,
+        userId: req.user?.id,
+      });
+
+      const [deletedFileTag] = await db
+        .delete(fileTags)
+        .where(
+          and(
+            eq(fileTags.fileId, parseInt(req.params.fileId)),
+            eq(fileTags.tagId, parseInt(req.params.tagId))
+          )
+        )
+        .returning();
+
+      if (!deletedFileTag) {
+        Logger.warn("Tag association not found", {
+          fileId: req.params.fileId,
+          tagId: req.params.tagId,
+          boardId: req.params.boardId,
+        });
+        return res.status(404).send("Tag association not found");
+      }
+
+      Logger.info("Tag removed from file successfully", {
+        fileId: req.params.fileId,
+        tagId: req.params.tagId,
+        boardId: req.params.boardId,
+        userId: req.user?.id,
+      });
+      res.json({ message: "Tag removed successfully" });
+    } catch (error) {
+      Logger.error("Error removing tag from file", error as Error, {
+        userId: req.user?.id,
+        boardId: req.params.boardId,
+        fileId: req.params.fileId,
+        tagId: req.params.tagId,
+      });
+      res.status(500).send("Failed to remove tag from file");
     }
   });
 

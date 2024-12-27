@@ -4,7 +4,7 @@ import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { File as FileIcon, Tag, Plus, Trash2, X } from "lucide-react";
 import { format } from "date-fns";
-import type { FileTag, Tag as TagType } from "@db/schema";
+import type { File, Tag as TagType } from "@db/schema";
 import {
   Dialog,
   DialogContent,
@@ -32,23 +32,10 @@ interface FileListProps {
   boardId: number;
 }
 
-interface FileWithTags {
-  id: number;
-  filename: string;
-  originalName: string;
-  mimeType: string;
-  size: number;
-  boardId: number;
-  uploadedBy: number;
+interface FileWithTags extends Omit<File, 'createdAt'> {
   createdAt: string;
   tags: {
-    tag: {
-      id: number;
-      name: string;
-      boardId: number;
-      isStudyUnitTag: boolean;
-      createdAt: string;
-    };
+    tag: TagType;
   }[];
 }
 
@@ -104,6 +91,7 @@ export default function FileList({ boardId }: FileListProps) {
         description: "Tag created successfully",
       });
     } catch (error) {
+      console.error("Error creating tag:", error);
       toast({
         variant: "destructive",
         title: "Error",
@@ -128,6 +116,7 @@ export default function FileList({ boardId }: FileListProps) {
         });
       }
     } catch (error) {
+      console.error("Error toggling tag:", error);
       toast({
         variant: "destructive",
         title: "Error",
@@ -145,6 +134,7 @@ export default function FileList({ boardId }: FileListProps) {
       });
       setSelectedFile(null);
     } catch (error) {
+      console.error("Error deleting file:", error);
       toast({
         variant: "destructive",
         title: "Error",
