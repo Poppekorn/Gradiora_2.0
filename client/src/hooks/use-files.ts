@@ -33,6 +33,26 @@ export function useFiles(boardId: number) {
     },
   });
 
+  const deleteFile = useMutation({
+    mutationFn: async (fileId: number) => {
+      const response = await fetch(`/api/boards/${boardId}/files/${fileId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ 
+        queryKey: [`/api/boards/${boardId}/files`] 
+      });
+    },
+  });
+
   const createTag = useMutation({
     mutationFn: async (tag: Omit<NewTag, "boardId">) => {
       const response = await fetch(`/api/boards/${boardId}/tags`, {
@@ -106,6 +126,7 @@ export function useFiles(boardId: number) {
     tags,
     isLoading,
     uploadFile: uploadFile.mutateAsync,
+    deleteFile: deleteFile.mutateAsync,
     createTag: createTag.mutateAsync,
     addTagToFile: addTagToFile.mutateAsync,
     removeTagFromFile: removeTagFromFile.mutateAsync,

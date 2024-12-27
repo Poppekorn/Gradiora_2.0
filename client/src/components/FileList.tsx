@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useFiles } from "@/hooks/use-files";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { File as FileIcon, Tag, Plus } from "lucide-react";
+import { File as FileIcon, Tag, Plus, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import type { FileTag, Tag as TagType } from "@db/schema";
 import {
@@ -31,16 +31,10 @@ interface FileListProps {
   boardId: number;
 }
 
-interface FileWithTags {
-  id: number;
-  filename: string;
-  originalName: string;
-  mimeType: string;
-  size: number;
-  boardId: number;
-  uploadedBy: number;
-  createdAt: Date;
-  tags: TagType[];
+interface FileWithTags extends File {
+  tags: {
+    tag: TagType;
+  }[];
 }
 
 export default function FileList({ boardId }: FileListProps) {
@@ -48,7 +42,7 @@ export default function FileList({ boardId }: FileListProps) {
   const [newTagName, setNewTagName] = useState("");
   const [showSuggestionDialog, setShowSuggestionDialog] = useState(false);
   const [similarTagSuggestions, setSimilarTagSuggestions] = useState<string[]>([]);
-  const { files, isLoading, tags, createTag, addTagToFile, removeTagFromFile } = useFiles(boardId);
+  const { files, isLoading, tags, createTag, addTagToFile, removeTagFromFile, deleteFile } = useFiles(boardId);
   const { toast } = useToast();
 
   const handleCreateTag = async () => {
@@ -72,7 +66,7 @@ export default function FileList({ boardId }: FileListProps) {
       }
 
       // Find similar tags
-      const similarTags = tags 
+      const similarTags = tags
         ? findSimilarTags(newTagName, tags.map(t => t.name))
         : [];
 
@@ -118,6 +112,23 @@ export default function FileList({ boardId }: FileListProps) {
     }
   };
 
+  const handleDeleteFile = async (fileId: number) => {
+    try {
+      await deleteFile(fileId);
+      toast({
+        title: "Success",
+        description: "File deleted successfully",
+      });
+      setSelectedFile(null);
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to delete file",
+      });
+    }
+  };
+
   if (isLoading) {
     return <div>Loading files...</div>;
   }
@@ -139,27 +150,40 @@ export default function FileList({ boardId }: FileListProps) {
     <>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {files.map((file: FileWithTags) => (
-          <Card 
-            key={file.id} 
+          <Card
+            key={file.id}
             className="hover:shadow-lg transition-shadow cursor-pointer"
             onClick={() => setSelectedFile(file)}
           >
             <CardHeader>
-              <div className="flex items-center gap-2">
-                <FileIcon className="h-5 w-5" />
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-semibold truncate">{file.originalName}</h3>
-                  <p className="text-sm text-muted-foreground">
-                    {format(new Date(file.createdAt), "PPp")}
-                  </p>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 flex-1 min-w-0">
+                  <FileIcon className="h-5 w-5 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-semibold truncate">{file.originalName}</h3>
+                    <p className="text-sm text-muted-foreground">
+                      {format(new Date(file.createdAt), "PPp")}
+                    </p>
+                  </div>
                 </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="flex-shrink-0 text-red-500 hover:text-red-600"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteFile(file.id);
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
               </div>
             </CardHeader>
             <CardContent>
               <div className="flex items-start gap-2">
                 <Tag className="h-4 w-4 mt-1" />
                 <div className="flex flex-wrap gap-2">
-                  {file.tags?.map((tag) => (
+                  {file.tags?.map(({ tag }) => (
                     <Badge key={tag.id} variant="secondary">
                       {tag.name}
                       {tag.isStudyUnitTag && " (Study Unit)"}
@@ -202,7 +226,7 @@ export default function FileList({ boardId }: FileListProps) {
               <h4 className="font-medium">Available Tags</h4>
               <div className="flex flex-wrap gap-2">
                 {tags?.map((tag) => {
-                  const hasTag = selectedFile?.tags?.some(t => t.id === tag.id);
+                  const hasTag = selectedFile?.tags?.some(t => t.tag.id === tag.id);
                   return (
                     <Badge
                       key={tag.id}
@@ -220,51 +244,50 @@ export default function FileList({ boardId }: FileListProps) {
           </div>
         </DialogContent>
       </Dialog>
-      {showSuggestionDialog && (
-        <AlertDialog open={showSuggestionDialog} onOpenChange={setShowSuggestionDialog}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Similar Tags Found</AlertDialogTitle>
-              <AlertDialogDescription>
-                We found similar existing tags. Would you like to use one of these instead?
-                <div className="mt-4 space-y-2">
-                  {similarTagSuggestions.map((tagName) => (
-                    <div
-                      key={tagName}
-                      className="p-2 border rounded hover:bg-accent cursor-pointer"
-                      onClick={() => {
-                        setNewTagName(tagName);
-                        setShowSuggestionDialog(false);
-                      }}
-                    >
-                      {tagName}
-                    </div>
-                  ))}
-                </div>
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={async () => {
-                  setShowSuggestionDialog(false);
-                  await createTag({
-                    name: newTagName.trim(),
-                    isStudyUnitTag: false,
-                  });
-                  setNewTagName("");
-                  toast({
-                    title: "Success",
-                    description: "Tag created successfully",
-                  });
-                }}
-              >
-                Create New Tag Anyway
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      )}
+
+      <AlertDialog open={showSuggestionDialog} onOpenChange={setShowSuggestionDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Similar Tags Found</AlertDialogTitle>
+            <AlertDialogDescription>
+              We found similar existing tags. Would you like to use one of these instead?
+              <div className="mt-4 space-y-2">
+                {similarTagSuggestions.map((tagName) => (
+                  <div
+                    key={tagName}
+                    className="p-2 border rounded hover:bg-accent cursor-pointer"
+                    onClick={() => {
+                      setNewTagName(tagName);
+                      setShowSuggestionDialog(false);
+                    }}
+                  >
+                    {tagName}
+                  </div>
+                ))}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={async () => {
+                setShowSuggestionDialog(false);
+                await createTag({
+                  name: newTagName.trim(),
+                  isStudyUnitTag: false,
+                });
+                setNewTagName("");
+                toast({
+                  title: "Success",
+                  description: "Tag created successfully",
+                });
+              }}
+            >
+              Create New Tag Anyway
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

@@ -477,6 +477,61 @@ export function registerRoutes(app: Express): Server {
   });
 
 
+  // Delete file endpoint
+  app.delete("/api/boards/:boardId/files/:fileId", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      Logger.warn("Unauthorized file deletion attempt", {
+        ip: req.ip,
+        headers: req.headers,
+        boardId: req.params.boardId,
+        fileId: req.params.fileId,
+      });
+      return res.status(401).send("Not authenticated");
+    }
+
+    try {
+      // First delete file tags
+      await db
+        .delete(fileTags)
+        .where(eq(fileTags.fileId, parseInt(req.params.fileId)));
+
+      // Then delete the file record
+      const [deletedFile] = await db
+        .delete(files)
+        .where(eq(files.id, parseInt(req.params.fileId)))
+        .returning();
+
+      if (!deletedFile) {
+        Logger.warn("File not found for deletion", {
+          fileId: req.params.fileId,
+          boardId: req.params.boardId,
+          userId: req.user?.id,
+        });
+        return res.status(404).send("File not found");
+      }
+
+      // Delete the actual file from the filesystem
+      const filePath = path.join(process.cwd(), 'uploads', deletedFile.filename);
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+
+      Logger.info("File deleted successfully", {
+        fileId: req.params.fileId,
+        boardId: req.params.boardId,
+        userId: req.user?.id,
+      });
+      res.json({ message: "File deleted successfully" });
+    } catch (error) {
+      Logger.error("Error deleting file", error as Error, {
+        userId: req.user?.id,
+        boardId: req.params.boardId,
+        fileId: req.params.fileId,
+      });
+      res.status(500).send("Failed to delete file");
+    }
+  });
+
   // File management routes
   app.post("/api/boards/:boardId/files", upload.single('file'), async (req, res) => {
     if (!req.isAuthenticated()) {
