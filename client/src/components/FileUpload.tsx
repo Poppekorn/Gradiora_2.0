@@ -117,9 +117,10 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
     if (!newTagName.trim()) return;
 
     try {
-      // Check if tag already exists
+      // Check if tag already exists (case-insensitive)
+      const normalizedNewTag = newTagName.trim().toLowerCase();
       const tagExists = tags?.some(
-        tag => tag.name.toLowerCase() === newTagName.trim().toLowerCase()
+        tag => tag.name.toLowerCase() === normalizedNewTag
       );
 
       if (tagExists) {
@@ -150,15 +151,15 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
     }
   };
 
-  // Ensure study unit tags exist when the component mounts or tiles change
+  // Create study unit tags only once when tiles change
   useEffect(() => {
     const createMissingTags = async () => {
-      if (!tiles) return;
+      if (!tiles?.length || !tags?.length) return;
 
-      // Create tags for each study unit if they don't exist
       for (const tile of tiles) {
-        const tagExists = tags?.some(
-          tag => tag.name === tile.title && tag.isStudyUnitTag
+        const normalizedTileTitle = tile.title.toLowerCase();
+        const tagExists = tags.some(
+          tag => tag.name.toLowerCase() === normalizedTileTitle && tag.isStudyUnitTag
         );
 
         if (!tagExists) {
@@ -175,7 +176,7 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
     };
 
     createMissingTags();
-  }, [tiles, tags]);
+  }, [tiles, tags, createTag]);
 
   const toggleTag = (tagId: number) => {
     setSelectedTags(prev =>
