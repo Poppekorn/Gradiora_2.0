@@ -35,7 +35,7 @@ async function extractTextFromImage(imagePath: string): Promise<string> {
 
     return ocrResult.text;
   } catch (error) {
-    Logger.error("Error extracting text from image:", error);
+    Logger.error("Error extracting text from image:", error as Error);
     throw new Error("Failed to extract text from image");
   }
 }
@@ -88,6 +88,11 @@ async function manageQuota(userId: number, tokenCount: number) {
           set: values,
         });
     } else {
+      // Check if quota would be exceeded
+      if (userQuota.tokenCount + tokenCount > userQuota.quotaLimit) {
+        throw new Error("API quota exceeded");
+      }
+
       // Update existing quota
       await db
         .update(apiQuota)
@@ -99,8 +104,36 @@ async function manageQuota(userId: number, tokenCount: number) {
         .where(eq(apiQuota.userId, userId));
     }
   } catch (error) {
-    Logger.error("Error managing quota:", { error, userId, tokenCount });
+    Logger.error("Error managing quota:", error as Error);
     throw error;
+  }
+}
+
+export async function getQuotaInfo(userId: number) {
+  try {
+    const [quota] = await db
+      .select()
+      .from(apiQuota)
+      .where(eq(apiQuota.userId, userId))
+      .limit(1);
+
+    if (!quota) {
+      return {
+        tokenCount: 0,
+        callCount: 0,
+        quotaLimit: 100000,
+        resetAt: new Date(
+          new Date().getFullYear(),
+          new Date().getMonth() + 1,
+          1
+        ),
+      };
+    }
+
+    return quota;
+  } catch (error) {
+    Logger.error("Error fetching quota info:", error as Error);
+    throw new Error("Failed to fetch quota information");
   }
 }
 
@@ -168,29 +201,6 @@ Do not:
   };
 }
 
-export async function getQuotaInfo(userId: number) {
-  const [quota] = await db
-    .select()
-    .from(apiQuota)
-    .where(eq(apiQuota.userId, userId))
-    .limit(1);
-
-  if (!quota) {
-    return {
-      tokenCount: 0,
-      callCount: 0,
-      quotaLimit: 100000,
-      resetAt: new Date(
-        new Date().getFullYear(),
-        new Date().getMonth() + 1,
-        1
-      ),
-    };
-  }
-
-  return quota;
-}
-
 export async function summarizeContent(content: string | Buffer, level: string = 'high_school', userId: number, fileId: number, mimeType?: string): Promise<AnalysisResult> {
   Logger.info("Starting content summarization", { level, mimeType });
 
@@ -235,7 +245,7 @@ export async function summarizeContent(content: string | Buffer, level: string =
 
     return result;
   } catch (error) {
-    Logger.error("Error in summarizeContent:", error);
+    Logger.error("Error in summarizeContent:", error as Error);
     throw error;
   }
 }

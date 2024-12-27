@@ -43,7 +43,7 @@ export async function performOCR(imagePath: string): Promise<OCRResult> {
     const imageBase64 = await fs.readFile(imagePath, { encoding: 'base64' });
 
     const visionResult = await openai.chat.completions.create({
-      model: "gpt-4-vision-preview", // Using the correct model name
+      model: "gpt-4", // Using the stable model with vision capabilities
       messages: [
         {
           role: "system",
