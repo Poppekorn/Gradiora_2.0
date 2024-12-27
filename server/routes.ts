@@ -563,14 +563,18 @@ export function registerRoutes(app: Express): Server {
         })
         .returning();
 
-      // Add tags to file
+      // Add tags to file using the new endpoint
       for (const tagId of selectedTags) {
-        await db
-          .insert(fileTags)
-          .values({
-            fileId: fileRecord.id,
-            tagId: tagId,
+        try {
+          await axios.post(`/api/boards/${req.params.boardId}/files/${fileRecord.id}/tags/${tagId}`, {}, {
+            headers: {
+              Authorization: req.headers.authorization // Pass authorization headers
+            }
           });
+        } catch (error) {
+          Logger.error(`Error adding tag ${tagId} to file ${fileRecord.id}`, error)
+          // Consider a strategy for handling failed tag additions - rollback, partial success, etc.
+        }
       }
 
       Logger.info("File uploaded successfully", {
@@ -625,7 +629,7 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  // Tag management routes
+  // Tag management routes (updated)
   app.post("/api/boards/:boardId/tags", async (req, res) => {
     if (!req.isAuthenticated()) {
       Logger.warn("Unauthorized tag creation attempt", {
@@ -637,10 +641,27 @@ export function registerRoutes(app: Express): Server {
     }
 
     try {
+      // Check for existing tag first
+      const existingTag = await db.query.tags.findFirst({
+        where: (tags, { and, eq, sql }) => and(
+          eq(tags.boardId, parseInt(req.params.boardId)),
+          sql`lower(${tags.name}) = lower(${req.body.name.trim()})`
+        ),
+      });
+
+      if (existingTag) {
+        Logger.info("Returning existing tag", {
+          tagId: existingTag.id,
+          boardId: req.params.boardId,
+          userId: req.user?.id,
+        });
+        return res.json(existingTag);
+      }
+
       const [tag] = await db
         .insert(tags)
         .values({
-          name: req.body.name,
+          name: req.body.name.trim(),
           boardId: parseInt(req.params.boardId),
           isStudyUnitTag: req.body.isStudyUnitTag || false,
         })
@@ -659,6 +680,51 @@ export function registerRoutes(app: Express): Server {
         payload: req.body,
       });
       res.status(500).send("Failed to create tag");
+    }
+  });
+
+  // Add tag to file endpoint
+  app.post("/api/boards/:boardId/files/:fileId/tags/:tagId", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.status(401).send("Not authenticated");
+    }
+
+    try {
+      // Check if the association already exists
+      const existingAssociation = await db.query.fileTags.findFirst({
+        where: (fileTags, { and, eq }) => and(
+          eq(fileTags.fileId, parseInt(req.params.fileId)),
+          eq(fileTags.tagId, parseInt(req.params.tagId))
+        ),
+      });
+
+      if (existingAssociation) {
+        return res.json(existingAssociation);
+      }
+
+      const [fileTag] = await db
+        .insert(fileTags)
+        .values({
+          fileId: parseInt(req.params.fileId),
+          tagId: parseInt(req.params.tagId),
+        })
+        .returning();
+
+      Logger.info("Tag added to file successfully", {
+        fileId: req.params.fileId,
+        tagId: req.params.tagId,
+        boardId: req.params.boardId,
+        userId: req.user?.id,
+      });
+      res.json(fileTag);
+    } catch (error) {
+      Logger.error("Error adding tag to file", error as Error, {
+        userId: req.user?.id,
+        boardId: req.params.boardId,
+        fileId: req.params.fileId,
+        tagId: req.params.tagId,
+      });
+      res.status(500).send("Failed to add tag to file");
     }
   });
 

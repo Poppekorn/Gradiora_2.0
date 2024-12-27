@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { File, NewFile, Tag, NewTag } from "@db/schema";
+import { normalizeTagName } from "@/lib/tag-utils";
 
 export function useFiles(boardId: number) {
   const queryClient = useQueryClient();
@@ -55,10 +56,22 @@ export function useFiles(boardId: number) {
 
   const createTag = useMutation({
     mutationFn: async (tag: Omit<NewTag, "boardId">) => {
+      // Check for existing tags first
+      const existingTag = tags?.find(
+        existingTag => normalizeTagName(existingTag.name) === normalizeTagName(tag.name)
+      );
+
+      if (existingTag) {
+        return existingTag;
+      }
+
       const response = await fetch(`/api/boards/${boardId}/tags`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(tag),
+        body: JSON.stringify({
+          ...tag,
+          name: tag.name.trim(), // Ensure the name is trimmed
+        }),
         credentials: "include",
       });
 
