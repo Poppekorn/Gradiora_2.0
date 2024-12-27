@@ -18,7 +18,8 @@ export function useBoards() {
       });
 
       if (!response.ok) {
-        throw new Error(await response.text());
+        const errorText = await response.text();
+        throw new Error(errorText || "Failed to create board");
       }
 
       return response.json();
@@ -33,12 +34,16 @@ export function useBoards() {
       const response = await fetch(`/api/boards/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(board),
+        body: JSON.stringify({
+          ...board,
+          color: board.color || "#E2E8F0", // Ensure color is always sent
+        }),
         credentials: "include",
       });
 
       if (!response.ok) {
-        throw new Error(await response.text());
+        const errorText = await response.text();
+        throw new Error(errorText || "Failed to update board");
       }
 
       return response.json();
@@ -56,7 +61,8 @@ export function useBoards() {
       });
 
       if (!response.ok) {
-        throw new Error(await response.text());
+        const errorText = await response.text();
+        throw new Error(errorText || "Failed to delete board");
       }
 
       return response.json();

@@ -33,6 +33,7 @@ export default function EditBoardDialog({ board, open, onOpenChange }: EditBoard
     schedule: board.schedule || "",
     syllabus: board.syllabus || "",
     color: board.color || "#E2E8F0",
+    isArchived: board.isArchived || false,
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -40,14 +41,11 @@ export default function EditBoardDialog({ board, open, onOpenChange }: EditBoard
     setLoading(true);
 
     try {
-      const updatedBoard = await updateBoard({
-        ...board,
-        ...formData,
+      await updateBoard({
+        ...board, // Keep the original board data
+        ...formData, // Override with form data
+        id: board.id, // Ensure ID is included
       });
-
-      if (!updatedBoard) {
-        throw new Error("Failed to update class");
-      }
 
       toast({
         title: "Success",
