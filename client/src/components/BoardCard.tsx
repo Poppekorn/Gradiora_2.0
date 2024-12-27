@@ -1,6 +1,6 @@
 import { type Board } from "@db/schema";
 import { Card, CardHeader, CardContent, CardFooter } from "@/components/ui/card";
-import { Link } from "wouter";
+import { useLocation } from "wouter";
 import { BookOpen, Calendar, GraduationCap, MoreVertical, Edit, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,13 +34,14 @@ export default function BoardCard({ board }: BoardCardProps) {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const { deleteBoard } = useBoards();
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
 
   const handleDelete = async () => {
     try {
       await deleteBoard(board.id);
       toast({
         title: "Success",
-        description: "Class deleted successfully",
+        description: "Class and all associated study units deleted successfully",
       });
     } catch (error) {
       toast({
@@ -51,21 +52,28 @@ export default function BoardCard({ board }: BoardCardProps) {
     }
   };
 
+  const handleClick = (e: React.MouseEvent) => {
+    // Don't navigate if clicking on buttons or links
+    if ((e.target as HTMLElement).closest('button, a')) {
+      return;
+    }
+    setLocation(`/board/${board.id}`);
+  };
+
   return (
     <>
       <Card 
-        className="hover:shadow-lg transition-shadow"
+        className="hover:shadow-lg transition-shadow cursor-pointer"
         style={{ 
           backgroundColor: board.color || "#E2E8F0",
           borderColor: board.color ? `hsl(from ${board.color} h s calc(l - 10%))` : undefined
         }}
+        onClick={handleClick}
       >
         <CardHeader>
           <div className="flex justify-between items-start">
             <div className="flex-1">
-              <Link href={`/board/${board.id}`} className="hover:underline">
-                <h3 className="text-lg font-bold">{board.name}</h3>
-              </Link>
+              <h3 className="text-lg font-bold hover:underline">{board.name}</h3>
               {board.professor && (
                 <div className="flex items-center text-sm text-muted-foreground">
                   <GraduationCap className="mr-2 h-4 w-4" />
