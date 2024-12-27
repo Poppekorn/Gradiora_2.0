@@ -37,18 +37,18 @@ export async function optimizeSchedule({ tiles, board, user }: OptimizationInput
 
   const prompt = `
     As an AI study schedule optimizer, analyze the following course and student data:
-    
+
     Course: ${JSON.stringify(context.courseInfo)}
     Student Preferences: ${JSON.stringify(context.userPreferences)}
     Study Units: ${JSON.stringify(context.tiles)}
-    
+
     Create an optimized study schedule that:
     1. Prioritizes tasks based on due dates and complexity
     2. Considers the student's preferred study times
     3. Accounts for the course difficulty
     4. Balances workload across available time
     5. Suggests optimal duration for each study session
-    
+
     Provide recommendations in this format:
     {
       "schedule": [
@@ -69,7 +69,16 @@ export async function optimizeSchedule({ tiles, board, user }: OptimizationInput
       response_format: { type: "json_object" },
     });
 
-    const response = JSON.parse(completion.choices[0].message.content);
+    const content = completion.choices[0]?.message?.content;
+    if (!content) {
+      throw new Error("No response from OpenAI");
+    }
+
+    const response = JSON.parse(content);
+    if (!response.schedule || !Array.isArray(response.schedule)) {
+      throw new Error("Invalid response format from OpenAI");
+    }
+
     return response.schedule;
   } catch (error) {
     console.error("Error optimizing schedule:", error);

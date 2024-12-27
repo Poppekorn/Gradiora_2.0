@@ -15,14 +15,19 @@ export function registerRoutes(app: Express): Server {
       return res.status(401).send("Not authenticated");
     }
 
-    const userBoards = await db.query.boards.findMany({
-      where: eq(boards.organizationId, req.user.organizationId),
-      with: {
-        tiles: true,
-      },
-    });
+    try {
+      const userBoards = await db.query.boards.findMany({
+        where: (boards) => eq(boards.organizationId, req.user.organizationId),
+        with: {
+          tiles: true,
+        },
+      });
 
-    res.json(userBoards);
+      res.json(userBoards);
+    } catch (error) {
+      console.error("Error fetching boards:", error);
+      res.status(500).send("Failed to fetch boards");
+    }
   });
 
   app.post("/api/boards", async (req, res) => {
@@ -45,7 +50,7 @@ export function registerRoutes(app: Express): Server {
     }
 
     const boardTiles = await db.query.tiles.findMany({
-      where: eq(tiles.boardId, parseInt(req.params.boardId)),
+      where: (tiles) => eq(tiles.boardId, parseInt(req.params.boardId)),
     });
 
     res.json(boardTiles);
@@ -77,14 +82,15 @@ export function registerRoutes(app: Express): Server {
       const [board] = await db
         .select()
         .from(boards)
-        .where(eq(boards.id, boardId));
+        .where(eq(boards.id, boardId))
+        .limit(1);
 
       if (!board) {
         return res.status(404).send("Board not found");
       }
 
       const boardTiles = await db.query.tiles.findMany({
-        where: eq(tiles.boardId, boardId),
+        where: (tiles) => eq(tiles.boardId, boardId),
       });
 
       // Get the optimized schedule
