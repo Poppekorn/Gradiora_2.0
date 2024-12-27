@@ -28,6 +28,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { findSimilarTags, normalizeTagName } from "@/lib/tag-utils";
+import { useTagValidation } from "@/hooks/use-tag-validation";
+import cn from 'classnames';
 
 interface FileUploadProps {
   boardId: number;
@@ -68,6 +70,7 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
   const { tiles } = useTiles(boardId);
   const { boards } = useBoards();
   const { toast } = useToast();
+  const { validateTag, validationResult, isValidating } = useTagValidation(boardId);
 
   // Create board tag when component mounts
   useEffect(() => {
@@ -183,52 +186,62 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
     if (!newTagName.trim()) return;
 
     try {
-      const normalizedNewTag = normalizeTagName(newTagName);
-
-      // Check for exact matches
-      const exactMatchExists = tags?.some(
-        tag => normalizeTagName(tag.name) === normalizedNewTag
-      );
-
-      if (exactMatchExists) {
+      // If there's an existing tag, use it instead of creating a new one
+      if (validationResult.existingTag) {
+        const tagId = validationResult.existingTag.id;
+        if (!selectedTags.includes(tagId)) {
+          setSelectedTags(prev => [...prev, tagId]);
+        }
+        setNewTagName("");
         toast({
-          variant: "destructive",
-          title: "Error",
-          description: "A tag with this name already exists",
+          title: "Tag selected",
+          description: "Using existing tag"
         });
         return;
       }
 
-      // Find similar tags
-      const similarTags = tags
-        ? findSimilarTags(newTagName, tags.map(t => t.name))
-        : [];
+      const normalizedNewTag = normalizeTagName(newTagName);
 
-      if (similarTags.length > 0) {
-        // Show suggestion dialog
-        setShowSuggestionDialog(true);
-        setSimilarTagSuggestions(similarTags);
+      // Final validation check before creation
+      const validation = await validateTag(newTagName);
+      if (!validation.isValid) {
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: validation.message
+        });
         return;
       }
 
-      // If no similar tags found, create the new tag
-      await createTag({
+      // Create new tag
+      const tag = await createTag({
         name: newTagName.trim(),
         isStudyUnitTag: false,
       });
+
       setNewTagName("");
       toast({
         title: "Success",
-        description: "Tag created successfully",
+        description: "Tag created successfully"
       });
     } catch (error) {
       toast({
         variant: "destructive",
         title: "Error",
-        description: "Failed to create tag",
+        description: "Failed to create tag"
       });
     }
   };
+
+  useEffect(() => {
+    if (newTagName.trim()) {
+      const timer = setTimeout(() => {
+        validateTag(newTagName);
+      }, 300); // Debounce validation
+
+      return () => clearTimeout(timer);
+    }
+  }, [newTagName, validateTag]);
 
   const toggleTag = (tagId: number) => {
     setSelectedTags(prev =>
@@ -275,7 +288,11 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
                     placeholder="New tag name"
                     value={newTagName}
                     onChange={(e) => setNewTagName(e.target.value)}
-                    className="w-[200px]"
+                    className={cn(
+                      "w-[200px]",
+                      validationResult.isValid ? "" : "border-red-500",
+                      isValidating && "opacity-50"
+                    )}
                   />
                   <Button
                     type="button"
