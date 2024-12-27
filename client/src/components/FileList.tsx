@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useFiles } from "@/hooks/use-files";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { File as FileIcon, Tag, Plus, Trash2, X } from "lucide-react";
+import { File as FileIcon, Tag, Plus, Trash2, X, MoreVertical, Brain, BookOpen, GraduationCap, CheckSquare } from "lucide-react";
 import { format } from "date-fns";
 import type { File, Tag as TagType } from "@db/schema";
 import {
@@ -27,6 +27,14 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { findSimilarTags, normalizeTagName } from "@/lib/tag-utils";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { useMutation } from "@tanstack/react-query";
 
 interface FileListProps {
   boardId: number;
@@ -39,6 +47,23 @@ interface FileWithTags extends Omit<File, 'createdAt'> {
   }[];
 }
 
+interface AIAnalysisResult {
+  summary: string;
+  explanation: string;
+}
+
+interface QuizQuestion {
+  question: string;
+  options: string[];
+  correctAnswer: string;
+  explanation: string;
+}
+
+interface QuizResult {
+  topic: string;
+  questions: QuizQuestion[];
+}
+
 export default function FileList({ boardId }: FileListProps) {
   const [selectedFile, setSelectedFile] = useState<FileWithTags | null>(null);
   const [newTagName, setNewTagName] = useState("");
@@ -46,6 +71,88 @@ export default function FileList({ boardId }: FileListProps) {
   const [similarTagSuggestions, setSimilarTagSuggestions] = useState<string[]>([]);
   const { files, isLoading, tags, createTag, addTagToFile, removeTagFromFile, deleteFile } = useFiles(boardId);
   const { toast } = useToast();
+  const [showAnalysisDialog, setShowAnalysisDialog] = useState(false);
+  const [showQuizDialog, setShowQuizDialog] = useState(false);
+  const [selectedFiles, setSelectedFiles] = useState<number[]>([]);
+  const [analysisResult, setAnalysisResult] = useState<AIAnalysisResult | null>(null);
+  const [quizResult, setQuizResult] = useState<QuizResult | null>(null);
+
+  const analyzeMutation = useMutation({
+    mutationFn: async (fileId: number) => {
+      const response = await fetch(`/api/boards/${boardId}/files/${fileId}/analyze`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      if (!response.ok) throw new Error(await response.text());
+      return response.json();
+    },
+  });
+
+  const analyzeMultipleMutation = useMutation({
+    mutationFn: async (fileIds: number[]) => {
+      const response = await fetch(`/api/boards/${boardId}/files/analyze-multiple`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileIds }),
+        credentials: 'include',
+      });
+      if (!response.ok) throw new Error(await response.text());
+      return response.json();
+    },
+  });
+
+  const quizMutation = useMutation({
+    mutationFn: async (fileId: number) => {
+      const response = await fetch(`/api/boards/${boardId}/files/${fileId}/quiz`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      if (!response.ok) throw new Error(await response.text());
+      return response.json();
+    },
+  });
+
+  const handleAnalyze = async (fileId: number) => {
+    try {
+      const result = await analyzeMutation.mutateAsync(fileId);
+      setAnalysisResult(result);
+      setShowAnalysisDialog(true);
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to analyze file",
+      });
+    }
+  };
+
+  const handleAnalyzeMultiple = async () => {
+    try {
+      const result = await analyzeMultipleMutation.mutateAsync(selectedFiles);
+      setAnalysisResult(result);
+      setShowAnalysisDialog(true);
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to analyze files",
+      });
+    }
+  };
+
+  const handleGenerateQuiz = async (fileId: number) => {
+    try {
+      const result = await quizMutation.mutateAsync(fileId);
+      setQuizResult(result);
+      setShowQuizDialog(true);
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to generate quiz",
+      });
+    }
+  };
 
   const handleCreateTag = async () => {
     if (!newTagName.trim()) return;
@@ -162,68 +269,165 @@ export default function FileList({ boardId }: FileListProps) {
 
   return (
     <>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {files.map((file: FileWithTags) => (
-          <Card
-            key={file.id}
-            className="hover:shadow-lg transition-shadow cursor-pointer"
-            onClick={() => setSelectedFile(file)}
-          >
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 flex-1 min-w-0">
-                  <FileIcon className="h-5 w-5 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-semibold truncate">{file.originalName}</h3>
-                    <p className="text-sm text-muted-foreground">
-                      {format(new Date(file.createdAt), "PPp")}
-                    </p>
+      <div className="space-y-4">
+        {selectedFiles.length > 0 && (
+          <div className="flex items-center justify-between bg-muted p-4 rounded-lg">
+            <div className="flex items-center gap-2">
+              <CheckSquare className="h-4 w-4" />
+              <span>{selectedFiles.length} files selected</span>
+            </div>
+            <Button onClick={handleAnalyzeMultiple} disabled={analyzeMultipleMutation.isPending}>
+              <Brain className="mr-2 h-4 w-4" />
+              Analyze Together
+            </Button>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {files.map((file: FileWithTags) => (
+            <Card
+              key={file.id}
+              className="hover:shadow-lg transition-shadow"
+            >
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <FileIcon className="h-5 w-5 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-semibold truncate">{file.originalName}</h3>
+                      <p className="text-sm text-muted-foreground">
+                        {format(new Date(file.createdAt), "PPp")}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      className="form-checkbox h-4 w-4"
+                      checked={selectedFiles.includes(file.id)}
+                      onChange={(e) => {
+                        setSelectedFiles(prev =>
+                          e.target.checked
+                            ? [...prev, file.id]
+                            : prev.filter(id => id !== file.id)
+                        );
+                      }}
+                    />
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon">
+                          <MoreVertical className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => handleAnalyze(file.id)}>
+                          <Brain className="mr-2 h-4 w-4" />
+                          Analyze
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleGenerateQuiz(file.id)}>
+                          <GraduationCap className="mr-2 h-4 w-4" />
+                          Generate Quiz
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleDeleteFile(file.id)} className="text-red-500">
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="flex-shrink-0 text-red-500 hover:text-red-600"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDeleteFile(file.id);
-                  }}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-start gap-2">
-                <Tag className="h-4 w-4 mt-1" />
-                <div className="flex flex-wrap gap-2">
-                  {file.tags?.map(({ tag }) => (
-                    <Badge 
-                      key={tag.id} 
-                      variant={tag.isStudyUnitTag ? "secondary" : "default"}
-                      className="flex items-center gap-1"
-                    >
-                      {tag.name}
-                      {tag.isStudyUnitTag && " (Study Unit)"}
-                      {!tag.isStudyUnitTag && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleTag(file.id, tag.id, true);
-                          }}
-                          className="ml-1 hover:text-destructive"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      )}
-                    </Badge>
-                  ))}
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-start gap-2">
+                  <Tag className="h-4 w-4 mt-1" />
+                  <div className="flex flex-wrap gap-2">
+                    {file.tags?.map(({ tag }) => (
+                      <Badge
+                        key={tag.id}
+                        variant={tag.isStudyUnitTag ? "secondary" : "default"}
+                        className="flex items-center gap-1"
+                      >
+                        {tag.name}
+                        {tag.isStudyUnitTag && " (Study Unit)"}
+                        {!tag.isStudyUnitTag && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleTag(file.id, tag.id, true);
+                            }}
+                            className="ml-1 hover:text-destructive"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        )}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
+
+      <Dialog open={showAnalysisDialog} onOpenChange={setShowAnalysisDialog}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>AI Analysis</DialogTitle>
+            <DialogDescription>
+              Here's what I found in the {selectedFiles.length > 1 ? 'files' : 'file'}
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="max-h-[60vh]">
+            {analysisResult && (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="text-lg font-semibold mb-2">Summary</h3>
+                  <p className="text-muted-foreground">{analysisResult.summary}</p>
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold mb-2">Detailed Explanation</h3>
+                  <p className="text-muted-foreground whitespace-pre-wrap">{analysisResult.explanation}</p>
                 </div>
               </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+            )}
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showQuizDialog} onOpenChange={setShowQuizDialog}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Quiz</DialogTitle>
+            <DialogDescription>
+              Test your knowledge about {quizResult?.topic}
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="max-h-[60vh]">
+            {quizResult && (
+              <div className="space-y-8">
+                {quizResult.questions.map((q, i) => (
+                  <div key={i} className="space-y-4">
+                    <h3 className="font-semibold">Question {i + 1}: {q.question}</h3>
+                    <div className="space-y-2">
+                      {q.options.map((option, j) => (
+                        <div key={j} className="flex items-center gap-2">
+                          <div className={`p-2 rounded ${option === q.correctAnswer ? 'bg-green-100 dark:bg-green-900' : ''}`}>
+                            {option}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      <span className="font-medium">Explanation:</span> {q.explanation}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!selectedFile} onOpenChange={(open) => !open && setSelectedFile(null)}>
         <DialogContent>

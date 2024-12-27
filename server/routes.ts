@@ -9,6 +9,9 @@ import Logger from "./utils/logger";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
+import { analyzeContent, generateQuiz, analyzeMultipleContents } from "./services/openai";
+import { readFile } from "fs/promises";
+
 
 // Configure multer for file upload
 const storage = multer.diskStorage({
@@ -861,6 +864,160 @@ export function registerRoutes(app: Express): Server {
         boardId: req.params.boardId,
       });
       res.status(500).send("Failed to fetch tags");
+    }
+  });
+
+  // Analyze single file
+  app.post("/api/boards/:boardId/files/:fileId/analyze", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      Logger.warn("Unauthorized file analysis attempt", {
+        ip: req.ip,
+        headers: req.headers,
+        boardId: req.params.boardId,
+        fileId: req.params.fileId,
+      });
+      return res.status(401).send("Not authenticated");
+    }
+
+    try {
+      // Get file record
+      const [file] = await db
+        .select()
+        .from(files)
+        .where(eq(files.id, parseInt(req.params.fileId)))
+        .limit(1);
+
+      if (!file) {
+        return res.status(404).send("File not found");
+      }
+
+      // Read file content
+      const filePath = path.join(process.cwd(), 'uploads', file.filename);
+      const content = await readFile(filePath, 'utf-8');
+
+      // Get analysis
+      const analysis = await analyzeContent(content);
+
+      Logger.info("File analyzed successfully", {
+        fileId: req.params.fileId,
+        boardId: req.params.boardId,
+        userId: req.user?.id,
+      });
+
+      res.json(analysis);
+    } catch (error) {
+      Logger.error("Error analyzing file", error as Error, {
+        userId: req.user?.id,
+        boardId: req.params.boardId,
+        fileId: req.params.fileId,
+      });
+      res.status(500).send("Failed to analyze file");
+    }
+  });
+
+  // Generate quiz from file
+  app.post("/api/boards/:boardId/files/:fileId/quiz", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      Logger.warn("Unauthorized quiz generation attempt", {
+        ip: req.ip,
+        headers: req.headers,
+        boardId: req.params.boardId,
+        fileId: req.params.fileId,
+      });
+      return res.status(401).send("Not authenticated");
+    }
+
+    try {
+      // Get file record
+      const [file] = await db
+        .select()
+        .from(files)
+        .where(eq(files.id, parseInt(req.params.fileId)))
+        .limit(1);
+
+      if (!file) {
+        return res.status(404).send("File not found");
+      }
+
+      // Read file content
+      const filePath = path.join(process.cwd(), 'uploads', file.filename);
+      const content = await readFile(filePath, 'utf-8');
+
+      // Generate quiz
+      const quiz = await generateQuiz(content);
+
+      Logger.info("Quiz generated successfully", {
+        fileId: req.params.fileId,
+        boardId: req.params.boardId,
+        userId: req.user?.id,
+      });
+
+      res.json(quiz);
+    } catch (error) {
+      Logger.error("Error generating quiz", error as Error, {        userId: req.user?.id,
+        boardId: req.params.boardId,
+        fileId: req.params.fileId,
+      });
+      res.status(500).send("Failed to generate quiz");
+    }
+  });
+
+  // Analyze multiple files
+  app.post("/api/boards/:boardId/files/analyze-multiple", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      Logger.warn("Unauthorized multiple file analysis attempt", {
+        ip: req.ip,
+        headers: req.headers,
+        boardId: req.params.boardId,
+      });
+      return res.status(401).send("Not authenticated");
+    }
+
+    try {
+      const fileIds = req.body.fileIds as number[];
+      if (!Array.isArray(fileIds) || fileIds.length === 0) {
+        return res.status(400).send("No files selected");
+      }
+
+      // Get all files
+      const selectedFiles = await db
+        .select()
+        .from(files)
+        .where(
+          and(
+            eq(files.boardId, parseInt(req.params.boardId)),
+            sql`${files.id} = ANY(${fileIds})`
+          )
+        );
+
+      if (selectedFiles.length === 0) {
+        return res.status(404).send("No files found");
+      }
+
+      // Read all file contents
+      const contents = await Promise.all(
+        selectedFiles.map(async (file) => {
+          const filePath = path.join(process.cwd(), 'uploads', file.filename);
+          return readFile(filePath, 'utf-8');
+        })
+      );
+
+      // Get combined analysis
+      const analysis = await analyzeMultipleContents(contents);
+
+      Logger.info("Multiple files analyzed successfully", {
+        fileCount: fileIds.length,
+        boardId: req.params.boardId,
+        userId: req.user?.id,
+      });
+
+      res.json(analysis);
+    } catch (error) {
+      Logger.error("Error analyzing multiple files", error as Error, {
+        userId: req.user?.id,
+        boardId: req.params.boardId,
+      });
+      res.status(500).send("Failed to analyze files");
     }
   });
 
