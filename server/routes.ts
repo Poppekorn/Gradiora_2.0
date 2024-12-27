@@ -130,9 +130,21 @@ export function registerRoutes(app: Express): Server {
     }
 
     try {
+      // First delete all associated tiles
+      const boardId = parseInt(req.params.id);
+      await db
+        .delete(tiles)
+        .where(eq(tiles.boardId, boardId));
+
+      Logger.info("Associated tiles deleted", {
+        boardId: req.params.id,
+        userId: req.user?.id,
+      });
+
+      // Then delete the board
       const [deletedBoard] = await db
         .delete(boards)
-        .where(eq(boards.id, parseInt(req.params.id)))
+        .where(eq(boards.id, boardId))
         .returning();
 
       if (!deletedBoard) {
