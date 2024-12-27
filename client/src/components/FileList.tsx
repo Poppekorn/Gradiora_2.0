@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { File as FileIcon, Tag, Trash2, X, MoreVertical, Loader2, StickyNote, ChevronDown, ChevronUp, FileText } from "lucide-react";
 import { format } from "date-fns";
 import type { File, Tag as TagType } from "@db/schema";
+import { Progress } from "@/components/ui/progress";
 import {
   Dialog,
   DialogContent,
@@ -29,7 +30,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { FileSummary } from "@db/schema";
 
 interface FileListProps {
   boardId: number;
@@ -53,6 +53,7 @@ export default function FileList({ boardId }: FileListProps) {
   const { toast } = useToast();
   const [summaryLoading, setSummaryLoading] = useState<Record<number, boolean>>({});
   const [conversionLoading, setConversionLoading] = useState<Record<number, boolean>>({});
+  const [conversionProgress, setConversionProgress] = useState<Record<number, number>>({});
 
   const getSummary = useMutation({
     mutationFn: async (fileId: number) => {
@@ -66,14 +67,31 @@ export default function FileList({ boardId }: FileListProps) {
 
   const generateSummary = useMutation({
     mutationFn: async (fileId: number) => {
-      const response = await fetch(`/api/boards/${boardId}/files/${fileId}/summarize`, {
+      setConversionProgress(prev => ({ ...prev, [fileId]: 25 }));
+
+      // First step: OCR conversion
+      const response = await fetch(`/api/boards/${boardId}/files/${fileId}/convert`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+
+      if (!response.ok) throw new Error(await response.text());
+      setConversionProgress(prev => ({ ...prev, [fileId]: 50 }));
+
+      // Second step: Generate summary
+      const summaryResponse = await fetch(`/api/boards/${boardId}/files/${fileId}/summarize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ educationLevel }),
         credentials: 'include',
       });
-      if (!response.ok) throw new Error(await response.text());
-      return response.json();
+
+      setConversionProgress(prev => ({ ...prev, [fileId]: 75 }));
+
+      if (!summaryResponse.ok) throw new Error(await summaryResponse.text());
+      setConversionProgress(prev => ({ ...prev, [fileId]: 100 }));
+
+      return summaryResponse.json();
     },
   });
 
@@ -117,13 +135,17 @@ export default function FileList({ boardId }: FileListProps) {
   const handleQuickConversion = async (fileId: number) => {
     try {
       setConversionLoading(prev => ({ ...prev, [fileId]: true }));
+      setConversionProgress(prev => ({ ...prev, [fileId]: 0 }));
+
       await generateSummary.mutateAsync(fileId);
       setExpandedFileId(fileId);
+
       toast({
         title: "Success",
         description: "Image converted and summarized successfully!",
       });
     } catch (error) {
+      setConversionProgress(prev => ({ ...prev, [fileId]: 0 }));
       if ((error as Error).message?.includes('quota exceeded')) {
         toast({
           variant: "destructive",
@@ -204,6 +226,7 @@ export default function FileList({ boardId }: FileListProps) {
           const isLoading = summaryLoading[file.id];
           const isConverting = conversionLoading[file.id];
           const isImage = isImageFile(file.mimeType);
+          const progress = conversionProgress[file.id] || 0;
 
           return (
             <Card
@@ -272,6 +295,17 @@ export default function FileList({ boardId }: FileListProps) {
                     </DropdownMenu>
                   </div>
                 </div>
+                {isConverting && (
+                  <div className="mt-4">
+                    <Progress value={progress} className="w-full" />
+                    <p className="text-sm text-muted-foreground mt-2 text-center">
+                      {progress === 25 && "Converting image to text..."}
+                      {progress === 50 && "Text extracted, generating summary..."}
+                      {progress === 75 && "Finalizing summary..."}
+                      {progress === 100 && "Complete!"}
+                    </p>
+                  </div>
+                )}
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">

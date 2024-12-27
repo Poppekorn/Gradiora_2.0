@@ -40,6 +40,18 @@ async function extractTextFromImage(imagePath: string): Promise<string> {
   }
 }
 
+function preprocessOCRText(text: string): string {
+  // Remove common OCR artifacts and normalize text
+  return text
+    .replace(/[\u200B-\u200D\uFEFF]/g, '') // Remove zero-width spaces
+    .replace(/[^\S\r\n]+/g, ' ')  // Replace multiple spaces with single space
+    .replace(/[\n\r]+/g, '\n')    // Normalize line breaks
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line.length > 0)
+    .join('\n');
+}
+
 function chunkText(text: string, maxChunkSize: number = 3000): string[] {
   const chunks: string[] = [];
   let currentChunk = '';
@@ -139,29 +151,44 @@ export async function getQuotaInfo(userId: number) {
 
 async function processChunks(chunks: string[], userId: number, level: string): Promise<AnalysisResult> {
   const summaries = await Promise.all(chunks.map(async (chunk) => {
+    const cleanedText = preprocessOCRText(chunk);
+
     const response = await openai.chat.completions.create({
       model: "gpt-4",
       messages: [
         {
           role: "system",
-          content: `You are an expert content summarizer specializing in OCR-extracted text for ${level} students. Your task is to:
+          content: `You are an expert academic content analyzer for ${level} students. Your task is to process and analyze text extracted from study materials.
 
-1. Clean and interpret the OCR-extracted text, accounting for common OCR artifacts and formatting issues
-2. Create a clear, focused summary of the key points
-3. Provide a detailed explanation that elaborates on the main concepts
-4. Use language appropriate for ${level} level
-5. Maintain academic rigor while ensuring clarity
+Please provide your analysis in two clearly marked sections:
 
-Respond with two sections:
-1. "Summary": A concise overview of the main points
-2. "Explanation": A detailed breakdown of the concepts`
+1. SUMMARY:
+- Provide a concise, bullet-point summary of the main concepts
+- Focus on key terms, definitions, and core ideas
+- Use clear, ${level}-appropriate language
+- Keep points brief and memorable
+
+2. EXPLANATION:
+- Offer a detailed explanation of the concepts
+- Connect ideas and show relationships between concepts
+- Provide examples where relevant
+- Maintain academic rigor while ensuring clarity
+
+Format your response exactly as:
+SUMMARY:
+• [First key point]
+• [Second key point]
+etc.
+
+EXPLANATION:
+[Your detailed explanation]`
         },
         {
           role: "user",
-          content: chunk
+          content: cleanedText
         }
       ],
-      temperature: 0.3, // Lower temperature for more focused summaries
+      temperature: 0.3,
       max_tokens: 800
     });
 
@@ -173,9 +200,9 @@ Respond with two sections:
     }
 
     // Parse the response into summary and explanation sections
-    const sections = result.split(/(?=Summary:|Explanation:)/g);
-    const summary = sections.find(s => s.includes("Summary:"))?.replace("Summary:", "").trim() || '';
-    const explanation = sections.find(s => s.includes("Explanation:"))?.replace("Explanation:", "").trim() || '';
+    const sections = result.split(/(?=SUMMARY:|EXPLANATION:)/g);
+    const summary = sections.find(s => s.includes("SUMMARY:"))?.replace("SUMMARY:", "").trim() || '';
+    const explanation = sections.find(s => s.includes("EXPLANATION:"))?.replace("EXPLANATION:", "").trim() || '';
 
     return {
       summary,

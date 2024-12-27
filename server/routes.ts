@@ -10,6 +10,8 @@ import path from "path";
 import fs from "fs";
 import { summarizeContent, getQuotaInfo, getStoredSummary } from "./services/openai";
 import { readFile } from "fs/promises";
+import { performOCR } from "./services/ocr"; // Added import statement
+
 
 // Update the file upload configuration to handle images
 const storage = multer.diskStorage({
@@ -299,6 +301,85 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
+  // Add the new convert endpoint after the existing summarize endpoint
+  app.post("/api/boards/:boardId/files/:fileId/convert", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.status(401).send("Not authenticated");
+    }
+
+    try {
+      Logger.info("Starting file conversion", {
+        boardId: req.params.boardId,
+        fileId: req.params.fileId,
+        userId: req.user?.id,
+      });
+
+      const [file] = await db
+        .select()
+        .from(files)
+        .where(eq(files.id, parseInt(req.params.fileId)))
+        .limit(1);
+
+      if (!file) {
+        Logger.warn("File not found for conversion", {
+          fileId: req.params.fileId,
+          boardId: req.params.boardId,
+        });
+        return res.status(404).send("File not found");
+      }
+
+      const filePath = path.join(process.cwd(), 'uploads', file.filename);
+      const content = await readFile(filePath);
+
+      Logger.info("Converting file content", {
+        fileId: req.params.fileId,
+        mimeType: file.mimeType,
+      });
+
+      const ocrResult = await performOCR(filePath);
+
+      // Store the OCR result temporarily
+      await db
+        .insert(fileSummaries)
+        .values({
+          fileId: parseInt(req.params.fileId),
+          summary: "OCR Conversion Complete",
+          explanation: ocrResult.text,
+          educationLevel: 'raw_text',
+        })
+        .onConflictDoUpdate({
+          target: [fileSummaries.fileId, fileSummaries.educationLevel],
+          set: {
+            explanation: ocrResult.text,
+            updatedAt: new Date(),
+          },
+        });
+
+      Logger.info("File conversion completed", {
+        fileId: req.params.fileId,
+        boardId: req.params.boardId,
+        userId: req.user?.id,
+        confidence: ocrResult.confidence,
+      });
+
+      res.json({
+        success: true,
+        confidence: ocrResult.confidence,
+        textLength: ocrResult.text.length
+      });
+    } catch (error) {
+      Logger.error("Error converting file", error as Error, {
+        userId: req.user?.id,
+        boardId: req.params.boardId,
+        fileId: req.params.fileId,
+        errorMessage: (error as Error).message,
+      });
+
+      res.status(500).send("Failed to convert file");
+    }
+  });
+
+
   // Add a new endpoint to get stored summaries
   app.get("/api/boards/:boardId/files/:fileId/summary", async (req, res) => {
     if (!req.isAuthenticated()) {
@@ -318,6 +399,7 @@ export function registerRoutes(app: Express): Server {
       res.status(500).send("Failed to fetch summary");
     }
   });
+
 
 
   // Boards API
@@ -900,7 +982,7 @@ export function registerRoutes(app: Express): Server {
       const existingAssociation = await db.query.fileTags.findFirst({
         where: (fileTags, { and, eq }) => and(
           eq(fileTags.fileId, parseInt(req.params.fileId)),
-          eq(fileTags.tagId, parseInt(req.params.tagId))
+          eq(fileTags.tagId, parseInt(req.paramstagId))
         ),
       });
 
@@ -986,14 +1068,15 @@ export function registerRoutes(app: Express): Server {
         userId: req.user?.id,
       });
       res.json({ message: "Tag removed successfully" });
-    } catch(error) {
+    } catch (error) {
       Logger.error("Error removing tag from file", error as Error, {
         userId: req.user?.id,
         boardId: req.params.boardId,
         fileId: req.params.fileId,
         tagId: req.params.tagId,
       });
-      res.status(500).send("Failed to remove tag from file");    }
+      res.status(500).send("Failed to remove tag from file");
+    }
   });
 
   app.get("/api/boards/:boardId/tags", async (req, res) => {
