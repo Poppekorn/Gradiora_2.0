@@ -70,7 +70,7 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
   const { tiles } = useTiles(boardId);
   const { boards } = useBoards();
   const { toast } = useToast();
-  const { validateTag, validationResult, isValidating } = useTagValidation(boardId);
+  const { validateTag, validationResult, isValidating, setValidationResult } = useTagValidation(boardId);
 
   // Create board tag when component mounts
   useEffect(() => {
@@ -186,30 +186,27 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
     if (!newTagName.trim()) return;
 
     try {
-      // If there's an existing tag, use it instead of creating a new one
-      if (validationResult.existingTag) {
-        const tagId = validationResult.existingTag.id;
-        if (!selectedTags.includes(tagId)) {
-          setSelectedTags(prev => [...prev, tagId]);
-        }
-        setNewTagName("");
-        toast({
-          title: "Tag selected",
-          description: "Using existing tag"
-        });
-        return;
-      }
-
-      const normalizedNewTag = normalizeTagName(newTagName);
-
-      // Final validation check before creation
       const validation = await validateTag(newTagName);
+
       if (!validation.isValid) {
-        toast({
-          variant: "destructive",
-          title: "Error",
-          description: validation.message
-        });
+        if (validation.existingTag) {
+          // If there's an existing tag, use it
+          const tagId = validation.existingTag.id;
+          if (!selectedTags.includes(tagId)) {
+            setSelectedTags(prev => [...prev, tagId]);
+          }
+          setNewTagName("");
+          toast({
+            title: "Tag selected",
+            description: "Using existing tag"
+          });
+        } else {
+          toast({
+            variant: "destructive",
+            title: "Error",
+            description: validation.message
+          });
+        }
         return;
       }
 
@@ -219,7 +216,12 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
         isStudyUnitTag: false,
       });
 
+      if (tag) {
+        setSelectedTags(prev => [...prev, tag.id]);
+      }
+
       setNewTagName("");
+      setValidationResult({ isValid: true });
       toast({
         title: "Success",
         description: "Tag created successfully"
@@ -235,13 +237,16 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
 
   useEffect(() => {
     if (newTagName.trim()) {
-      const timer = setTimeout(() => {
-        validateTag(newTagName);
-      }, 300); // Debounce validation
+      const timer = setTimeout(async () => {
+        const result = await validateTag(newTagName);
+        setValidationResult(result);
+      }, 300);
 
       return () => clearTimeout(timer);
+    } else {
+      setValidationResult({ isValid: true });
     }
-  }, [newTagName, validateTag]);
+  }, [newTagName, validateTag, setValidationResult]);
 
   const toggleTag = (tagId: number) => {
     setSelectedTags(prev =>
@@ -290,7 +295,7 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
                     onChange={(e) => setNewTagName(e.target.value)}
                     className={cn(
                       "w-[200px]",
-                      validationResult.isValid ? "" : "border-red-500",
+                      !validationResult.isValid && "border-red-500",
                       isValidating && "opacity-50"
                     )}
                   />
@@ -299,7 +304,7 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
                     variant="outline"
                     size="icon"
                     onClick={handleCreateTag}
-                    disabled={!newTagName.trim()}
+                    disabled={!newTagName.trim() || isValidating}
                   >
                     <Plus className="h-4 w-4" />
                   </Button>
@@ -338,7 +343,6 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
           </form>
         </DialogContent>
       </Dialog>
-
       <AlertDialog open={showSuggestionDialog} onOpenChange={setShowSuggestionDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
