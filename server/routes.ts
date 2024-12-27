@@ -8,10 +8,9 @@ import Logger from "./utils/logger";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
-import { summarizeContent, getQuotaInfo, getStoredSummary } from "./services/openai";
-import { readFile } from "fs/promises";
-import { performOCR } from "./services/ocr"; // Added import statement
 import { promises as fsPromises } from "fs";
+import { summarizeContent, getQuotaInfo, getStoredSummary } from "./services/openai";
+import { performOCR } from "./services/ocr";
 import { PDFDocument } from "pdf-lib";
 import mammoth from "mammoth";
 import sharp from "sharp";
@@ -20,8 +19,8 @@ import sharp from "sharp";
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     const uploadDir = path.join(process.cwd(), 'uploads');
-    if (!fsPromises.existsSync(uploadDir)) {
-      fsPromises.mkdirSync(uploadDir, { recursive: true });
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
     }
     cb(null, uploadDir);
   },
@@ -333,7 +332,7 @@ export function registerRoutes(app: Express): Server {
 
         res.setHeader('Content-Type', file.mimeType);
         return res.send(thumbnail);
-      } 
+      }
       else if (file.mimeType === 'application/pdf') {
         // For PDFs, get first page as image
         const pdfBytes = await fsPromises.readFile(filePath);
@@ -341,7 +340,7 @@ export function registerRoutes(app: Express): Server {
         const pages = pdfDoc.getPages();
         if (pages.length > 0) {
           // Implementation for PDF preview would go here
-          return res.json({ 
+          return res.json({
             type: 'pdf',
             pageCount: pages.length,
             metadata: pdfDoc.getTitle()
@@ -352,7 +351,7 @@ export function registerRoutes(app: Express): Server {
         // For Word documents, extract text preview
         const result = await mammoth.extractRawText({ path: filePath });
         const previewText = result.value.substring(0, 1000) + (result.value.length > 1000 ? '...' : '');
-        return res.json({ 
+        return res.json({
           type: 'document',
           preview: previewText,
           metadata: {
@@ -415,7 +414,7 @@ export function registerRoutes(app: Express): Server {
           confidence: ocrResult.confidence,
           textLength: extractedText.length
         });
-      } 
+      }
       else if (file.mimeType.includes('wordprocessingml.document') || file.mimeType.includes('msword')) {
         const result = await mammoth.extractRawText({ path: filePath });
         extractedText = result.value;
@@ -476,7 +475,6 @@ export function registerRoutes(app: Express): Server {
       res.status(500).send("Failed to fetch summary");
     }
   });
-
 
 
   // Boards API
@@ -638,8 +636,8 @@ export function registerRoutes(app: Express): Server {
       // Delete physical files
       for (const file of deletedFiles) {
         const filePath = path.join(process.cwd(), 'uploads', file.filename);
-        if (fsPromises.existsSync(filePath)) {
-          fsPromises.unlinkSync(filePath);
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
         }
       }
 
@@ -959,7 +957,8 @@ export function registerRoutes(app: Express): Server {
         userId: req.user?.id,
         boardId: req.params.boardId,
       });
-      res.status(500).send("Failed to optimize schedule");    }
+      res.status(500).send("Failed to optimize schedule");
+    }
   });
 
   // Delete file endpoint
@@ -1012,8 +1011,8 @@ export function registerRoutes(app: Express): Server {
 
       // Delete the actual file from the filesystem
       const filePath = path.join(process.cwd(), 'uploads', deletedFile.filename);
-      if (fsPromises.existsSync(filePath)) {
-        fsPromises.unlinkSync(filePath);
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
       }
 
       Logger.info("File deleted successfully", {
@@ -1021,6 +1020,7 @@ export function registerRoutes(app: Express): Server {
         boardId: req.params.boardId,
         userId: req.user?.id,
       });
+
       res.json({ message: "File deleted successfully" });
     } catch (error) {
       Logger.error("Error deleting file", error as Error, {
