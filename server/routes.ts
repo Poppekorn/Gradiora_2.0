@@ -9,10 +9,8 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { summarizeContent, getQuotaInfo, getStoredSummary } from "./services/openai";
-import { performOCR } from "./services/ocr";
 import { PDFDocument } from "pdf-lib";
 import mammoth from "mammoth";
-import sharp from "sharp";
 
 // Ensure uploads directory exists
 const uploadDir = path.join(process.cwd(), 'uploads');
@@ -42,15 +40,10 @@ const upload = multer({
       'text/plain': true,
       'text/markdown': true,
       'application/pdf': true,
-      'image/jpeg': true,
-      'image/png': true,
-      'image/webp': true,
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document': true,
-      'application/msword': true,
-      'application/x-msword': true
+      'application/msword': true
     };
 
-    // Normalize MIME type
     const normalizedMime = file.mimetype.toLowerCase();
     Logger.info("File upload attempt", {
       originalMime: file.mimetype,
@@ -63,7 +56,7 @@ const upload = multer({
         normalizedMime.includes('doc')) {
       cb(null, true);
     } else {
-      cb(new Error(`Invalid file type. Allowed types are: ${Object.keys(allowedMimes).join(', ')}`));
+      cb(new Error(`Invalid file type. Only document files are allowed (doc, docx, txt, pdf)`));
     }
   }
 });
@@ -73,15 +66,7 @@ async function extractTextFromDocument(filePath: string, mimeType: string): Prom
   try {
     Logger.info("Starting text extraction", { filePath, mimeType });
 
-    if (mimeType.startsWith('image/')) {
-      const ocrResult = await performOCR(filePath);
-      Logger.info("OCR completed", {
-        confidence: ocrResult.confidence,
-        textLength: ocrResult.text.length
-      });
-      return ocrResult.text;
-    } 
-    else if (mimeType.includes('word') || mimeType.includes('doc')) {
+    if (mimeType.includes('word') || mimeType.includes('doc')) {
       try {
         const result = await mammoth.extractRawText({ path: filePath });
         Logger.info("Word document text extracted", {
@@ -99,10 +84,21 @@ async function extractTextFromDocument(filePath: string, mimeType: string): Prom
       const content = await fs.promises.readFile(filePath, 'utf-8');
       return content;
     }
+    else if (mimeType === 'application/pdf') {
+      // For PDFs, extract text content
+      const pdfBytes = await fs.promises.readFile(filePath);
+      const pdfDoc = await PDFDocument.load(pdfBytes);
+      const pages = pdfDoc.getPages();
+      let text = '';
+      for (const page of pages) {
+        text += await page.getTextContent();
+      }
+      return text;
+    }
 
     throw new Error("Unsupported file type for text extraction");
   } catch (error) {
-    Logger.error("Error in text extraction:", error as Error);
+    Logger.error("Error in text extraction:", error);
     throw error;
   }
 }
@@ -132,16 +128,7 @@ export function registerRoutes(app: Express): Server {
         return res.status(404).send("File not found on disk");
       }
 
-      // Generate preview based on file type
-      if (file.mimeType.startsWith('image/')) {
-        const thumbnail = await sharp(filePath)
-          .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
-          .toBuffer();
-
-        res.setHeader('Content-Type', file.mimeType);
-        return res.send(thumbnail);
-      }
-      else if (file.mimeType === 'application/pdf') {
+      if (file.mimeType === 'application/pdf') {
         const pdfBytes = await fs.promises.readFile(filePath);
         const pdfDoc = await PDFDocument.load(pdfBytes);
         const pages = pdfDoc.getPages();

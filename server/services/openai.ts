@@ -5,7 +5,6 @@ import { apiQuota, fileSummaries } from "@db/schema";
 import { eq, desc } from "drizzle-orm";
 import fs from "fs";
 import path from "path";
-import { performOCR } from "./ocr";
 import { PDFDocument } from "pdf-lib";
 import mammoth from "mammoth";
 
@@ -18,27 +17,6 @@ if (!process.env.OPENAI_API_KEY) {
 interface AnalysisResult {
   summary: string;
   explanation: string;
-}
-
-async function extractTextFromImage(imagePath: string): Promise<string> {
-  try {
-    Logger.info("Starting OCR processing", { imagePath });
-    const result = await performOCR(imagePath);
-
-    if (!result.text) {
-      throw new Error("No text extracted from image");
-    }
-
-    Logger.info("OCR completed successfully", {
-      confidence: result.confidence,
-      textLength: result.text.length
-    });
-
-    return result.text;
-  } catch (error) {
-    Logger.error("Error in OCR processing:", error as Error);
-    throw new Error("Failed to extract text from image");
-  }
 }
 
 async function extractTextFromDocument(filePath: string, mimeType: string): Promise<string> {
@@ -60,6 +38,14 @@ async function extractTextFromDocument(filePath: string, mimeType: string): Prom
       }
     } else if (mimeType === 'text/plain' || mimeType === 'text/markdown') {
       text = await fs.promises.readFile(filePath, 'utf8');
+    } else if (mimeType === 'application/pdf') {
+      const pdfBytes = await fs.promises.readFile(filePath);
+      const pdfDoc = await PDFDocument.load(pdfBytes);
+      const pages = pdfDoc.getPages();
+      text = '';
+      for (const page of pages) {
+        text += await page.getTextContent();
+      }
     }
 
     if (!text || text.length < 10) {
@@ -68,7 +54,7 @@ async function extractTextFromDocument(filePath: string, mimeType: string): Prom
 
     return text;
   } catch (error) {
-    Logger.error("Error extracting document text:", error as Error);
+    Logger.error("Error extracting document text:", error);
     throw new Error("Failed to extract text from document");
   }
 }
@@ -77,7 +63,6 @@ function preprocessText(text: string): string {
   try {
     Logger.info("Starting text preprocessing", { originalLength: text.length });
 
-    // Remove common OCR artifacts and normalize text
     const cleaned = text
       .replace(/[\u200B-\u200D\uFEFF]/g, '') // Remove zero-width spaces
       .replace(/[^\S\r\n]+/g, ' ')  // Replace multiple spaces with single space
@@ -98,7 +83,7 @@ function preprocessText(text: string): string {
 
     return cleaned;
   } catch (error) {
-    Logger.error("Error preprocessing text:", error as Error);
+    Logger.error("Error preprocessing text:", error);
     throw new Error("Failed to preprocess text");
   }
 }
@@ -110,7 +95,6 @@ function chunkText(text: string, maxChunkSize: number = 3000): string[] {
     const chunks: string[] = [];
     let currentChunk = '';
 
-    // Split by paragraphs first
     const paragraphs = text.split(/\n\s*\n/);
 
     for (const paragraph of paragraphs) {
@@ -132,7 +116,7 @@ function chunkText(text: string, maxChunkSize: number = 3000): string[] {
 
     return chunks;
   } catch (error) {
-    Logger.error("Error chunking text:", error as Error);
+    Logger.error("Error chunking text:", error);
     throw new Error("Failed to chunk text");
   }
 }
@@ -149,7 +133,6 @@ async function manageQuota(userId: number, tokenCount: number) {
       .limit(1);
 
     if (!userQuota || new Date(userQuota.resetAt) < today) {
-      // Insert new quota or reset existing one
       const values = {
         userId,
         tokenCount,
@@ -167,12 +150,10 @@ async function manageQuota(userId: number, tokenCount: number) {
           set: values,
         });
     } else {
-      // Check if quota would be exceeded
       if (userQuota.tokenCount + tokenCount > userQuota.quotaLimit) {
         throw new Error("API quota exceeded");
       }
 
-      // Update existing quota
       await db
         .update(apiQuota)
         .set({
@@ -183,7 +164,7 @@ async function manageQuota(userId: number, tokenCount: number) {
         .where(eq(apiQuota.userId, userId));
     }
   } catch (error) {
-    Logger.error("Error managing quota:", error as Error);
+    Logger.error("Error managing quota:", error);
     throw error;
   }
 }
@@ -235,7 +216,6 @@ async function processChunks(chunks: string[], userId: number, level: string): P
 
     const summaries = await Promise.all(summaryPromises);
 
-    // Combine summaries intelligently
     const combinedSummary = summaries
       .map(s => s.summary)
       .filter(Boolean)
@@ -256,7 +236,7 @@ async function processChunks(chunks: string[], userId: number, level: string): P
       explanation: combinedExplanation || "Could not generate an explanation. Please check the file content and try again."
     };
   } catch (error) {
-    Logger.error("Error processing chunks:", error as Error);
+    Logger.error("Error processing chunks:", error);
     throw error;
   }
 }
@@ -276,16 +256,11 @@ export async function summarizeContent(
     if (typeof content === 'string') {
       textContent = content.trim();
     } else {
-      // If it's an image or document file
       const uploadDir = path.join(process.cwd(), 'uploads');
       const tempFilePath = path.join(uploadDir, `temp_${fileId}`);
       await fs.promises.writeFile(tempFilePath, content);
 
-      if (mimeType && mimeType.includes('image/')) {
-        textContent = await extractTextFromImage(`${tempFilePath}.jpg`);
-      } else {
-        textContent = await extractTextFromDocument(tempFilePath, mimeType || '');
-      }
+      textContent = await extractTextFromDocument(tempFilePath, mimeType || '');
 
       // Clean up temp file
       await fs.promises.unlink(tempFilePath).catch(() => {});
@@ -296,8 +271,7 @@ export async function summarizeContent(
     }
 
     Logger.info("Content extracted successfully", {
-      contentLength: textContent.length,
-      isImage: typeof content !== 'string'
+      contentLength: textContent.length
     });
 
     const chunks = chunkText(textContent);
@@ -305,7 +279,6 @@ export async function summarizeContent(
 
     const result = await processChunks(chunks, userId, level);
 
-    // Store the summary in the database
     await db.insert(fileSummaries).values({
       fileId,
       summary: result.summary,
@@ -328,7 +301,7 @@ export async function summarizeContent(
 
     return result;
   } catch (error) {
-    Logger.error("Error in summarizeContent:", error as Error);
+    Logger.error("Error in summarizeContent:", error);
     throw error;
   }
 }
@@ -356,7 +329,7 @@ export async function getQuotaInfo(userId: number) {
 
     return quota;
   } catch (error) {
-    Logger.error("Error fetching quota info:", error as Error);
+    Logger.error("Error fetching quota info:", error);
     throw new Error("Failed to fetch quota information");
   }
 }
