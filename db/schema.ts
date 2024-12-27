@@ -37,7 +37,7 @@ export const boards = pgTable("boards", {
   difficulty: text("difficulty").default("medium"),
   estimatedStudyHours: integer("estimated_study_hours"),
   recommendedSessionDuration: integer("recommended_session_duration"),
-  color: text("color").default("#E2E8F0"), // Default color (slate-200)
+  color: text("color").default("#E2E8F0"),
 });
 
 export const tiles = pgTable("tiles", {
@@ -59,7 +59,34 @@ export const tiles = pgTable("tiles", {
   complexity: text("complexity").default("medium"),
   recommendedTimeOfDay: text("recommended_time_of_day"),
   optimalStudyOrder: integer("optimal_study_order"),
-  color: text("color").default("#E2E8F0"), // Default color (slate-200)
+  color: text("color").default("#E2E8F0"),
+});
+
+// New tables for file management
+export const files = pgTable("files", {
+  id: serial("id").primaryKey(),
+  filename: text("filename").notNull(),
+  originalName: text("original_name").notNull(),
+  mimeType: text("mime_type").notNull(),
+  size: integer("size").notNull(),
+  boardId: integer("board_id").references(() => boards.id).notNull(),
+  uploadedBy: integer("uploaded_by").references(() => users.id).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const tags = pgTable("tags", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  boardId: integer("board_id").references(() => boards.id).notNull(),
+  isStudyUnitTag: boolean("is_study_unit_tag").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const fileTags = pgTable("file_tags", {
+  id: serial("id").primaryKey(),
+  fileId: integer("file_id").references(() => files.id).notNull(),
+  tagId: integer("tag_id").references(() => tags.id).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
 });
 
 // Relations
@@ -70,6 +97,8 @@ export const organizationsRelations = relations(organizations, ({ many }) => ({
 
 export const boardsRelations = relations(boards, ({ many, one }) => ({
   tiles: many(tiles),
+  files: many(files),
+  tags: many(tags),
   organization: one(organizations, {
     fields: [boards.organizationId],
     references: [organizations.id],
@@ -80,6 +109,37 @@ export const tilesRelations = relations(tiles, ({ one }) => ({
   board: one(boards, {
     fields: [tiles.boardId],
     references: [boards.id],
+  }),
+}));
+
+export const filesRelations = relations(files, ({ many, one }) => ({
+  tags: many(fileTags),
+  board: one(boards, {
+    fields: [files.boardId],
+    references: [boards.id],
+  }),
+  uploader: one(users, {
+    fields: [files.uploadedBy],
+    references: [users.id],
+  }),
+}));
+
+export const tagsRelations = relations(tags, ({ many, one }) => ({
+  files: many(fileTags),
+  board: one(boards, {
+    fields: [tags.boardId],
+    references: [boards.id],
+  }),
+}));
+
+export const fileTagsRelations = relations(fileTags, ({ one }) => ({
+  file: one(files, {
+    fields: [fileTags.fileId],
+    references: [files.id],
+  }),
+  tag: one(tags, {
+    fields: [fileTags.tagId],
+    references: [tags.id],
   }),
 }));
 
@@ -103,6 +163,21 @@ export const insertTileSchema = createInsertSchema(tiles);
 export const selectTileSchema = createSelectSchema(tiles);
 export type Tile = typeof tiles.$inferSelect;
 export type NewTile = typeof tiles.$inferInsert;
+
+export const insertFileSchema = createInsertSchema(files);
+export const selectFileSchema = createSelectSchema(files);
+export type File = typeof files.$inferSelect;
+export type NewFile = typeof files.$inferInsert;
+
+export const insertTagSchema = createInsertSchema(tags);
+export const selectTagSchema = createSelectSchema(tags);
+export type Tag = typeof tags.$inferSelect;
+export type NewTag = typeof tags.$inferInsert;
+
+export const insertFileTagSchema = createInsertSchema(fileTags);
+export const selectFileTagSchema = createSelectSchema(fileTags);
+export type FileTag = typeof fileTags.$inferSelect;
+export type NewFileTag = typeof fileTags.$inferInsert;
 
 // Aliases for backward compatibility
 export type InsertUser = NewUser;
