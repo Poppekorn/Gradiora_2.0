@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useFiles } from "@/hooks/use-files";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { File as FileIcon, Tag, Trash2, X, MoreVertical, Loader2, StickyNote, ChevronDown, ChevronUp } from "lucide-react";
+import { File as FileIcon, Tag, Trash2, X, MoreVertical, Loader2, StickyNote, ChevronDown, ChevronUp, FileText } from "lucide-react";
 import { format } from "date-fns";
 import type { File, Tag as TagType } from "@db/schema";
 import {
@@ -35,8 +35,7 @@ interface FileListProps {
   boardId: number;
 }
 
-interface FileWithTags extends Omit<File, 'createdAt'> {
-  createdAt: string;
+interface FileWithTags extends File {
   tags: {
     tag: TagType;
   }[];
@@ -53,6 +52,7 @@ export default function FileList({ boardId }: FileListProps) {
   const { files, isLoading, tags, removeTagFromFile, deleteFile } = useFiles(boardId);
   const { toast } = useToast();
   const [summaryLoading, setSummaryLoading] = useState<Record<number, boolean>>({});
+  const [conversionLoading, setConversionLoading] = useState<Record<number, boolean>>({});
 
   const getSummary = useMutation({
     mutationFn: async (fileId: number) => {
@@ -114,6 +114,34 @@ export default function FileList({ boardId }: FileListProps) {
     }
   };
 
+  const handleQuickConversion = async (fileId: number) => {
+    try {
+      setConversionLoading(prev => ({ ...prev, [fileId]: true }));
+      await generateSummary.mutateAsync(fileId);
+      setExpandedFileId(fileId);
+      toast({
+        title: "Success",
+        description: "Image converted and summarized successfully!",
+      });
+    } catch (error) {
+      if ((error as Error).message?.includes('quota exceeded')) {
+        toast({
+          variant: "destructive",
+          title: "API Quota Exceeded",
+          description: "The AI service is temporarily unavailable. Please try again later.",
+        });
+      } else {
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: "Failed to convert image. Please try again.",
+        });
+      }
+    } finally {
+      setConversionLoading(prev => ({ ...prev, [fileId]: false }));
+    }
+  };
+
   const handleDeleteFile = async (fileId: number) => {
     try {
       await deleteFile(fileId);
@@ -149,6 +177,10 @@ export default function FileList({ boardId }: FileListProps) {
     );
   }
 
+  const isImageFile = (mimeType: string) => {
+    return mimeType.startsWith('image/');
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-end mb-4">
@@ -170,13 +202,15 @@ export default function FileList({ boardId }: FileListProps) {
         {files.map((file: FileWithTags) => {
           const isExpanded = expandedFileId === file.id;
           const isLoading = summaryLoading[file.id];
+          const isConverting = conversionLoading[file.id];
+          const isImage = isImageFile(file.mimeType);
 
           return (
             <Card
               key={file.id}
               className="hover:shadow-lg transition-shadow"
             >
-              <CardHeader className="cursor-pointer" onClick={() => handleViewSummary(file.id)}>
+              <CardHeader className="cursor-pointer">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 flex-1 min-w-0">
                     <FileIcon className="h-5 w-5 flex-shrink-0" />
@@ -188,17 +222,41 @@ export default function FileList({ boardId }: FileListProps) {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    {isLoading ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Button variant="ghost" size="icon" className="ml-2">
-                        {isExpanded ? (
+                    {isImage && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleQuickConversion(file.id);
+                        }}
+                        disabled={isConverting}
+                        className="flex items-center gap-1"
+                      >
+                        {isConverting ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <FileText className="h-4 w-4" />
+                        )}
+                        <span>{isConverting ? "Converting..." : "Convert to Text"}</span>
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="ml-2"
+                      onClick={() => handleViewSummary(file.id)}
+                    >
+                      {isLoading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        isExpanded ? (
                           <ChevronUp className="h-4 w-4" />
                         ) : (
                           <ChevronDown className="h-4 w-4" />
-                        )}
-                      </Button>
-                    )}
+                        )
+                      )}
+                    </Button>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon">
