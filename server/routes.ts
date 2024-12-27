@@ -8,7 +8,7 @@ import Logger from "./utils/logger";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
-import { summarizeContent } from "./services/openai";
+import { summarizeContent, getQuotaInfo } from "./services/openai";
 import { readFile } from "fs/promises";
 
 // Configure multer for file upload
@@ -35,6 +35,36 @@ const upload = multer({
 
 export function registerRoutes(app: Express): Server {
   setupAuth(app);
+
+  // Add quota endpoint
+  app.get("/api/quota", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.status(401).send("Not authenticated");
+    }
+
+    try {
+      const quota = await getQuotaInfo(req.user!.id);
+
+      if (!quota) {
+        // Return default values if no quota record exists
+        return res.json({
+          tokenCount: 0,
+          callCount: 0,
+          quotaLimit: 100000,
+          resetAt: new Date(
+            new Date().getFullYear(),
+            new Date().getMonth() + 1,
+            1
+          ).toISOString(),
+        });
+      }
+
+      res.json(quota);
+    } catch (error) {
+      Logger.error("Error fetching quota info", error as Error);
+      res.status(500).send("Failed to fetch quota information");
+    }
+  });
 
   // Tag management routes
   app.post("/api/boards/:boardId/tags", async (req, res) => {

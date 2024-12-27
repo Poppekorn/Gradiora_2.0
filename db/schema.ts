@@ -89,6 +89,33 @@ export const fileTags = pgTable("file_tags", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// New table for API quota tracking
+export const apiQuota = pgTable("api_quota", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id).notNull(),
+  tokenCount: integer("token_count").notNull().default(0),
+  callCount: integer("call_count").notNull().default(0),
+  quotaLimit: integer("quota_limit").notNull().default(100000), // Default monthly limit
+  resetAt: timestamp("reset_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Add relations for apiQuota
+export const apiQuotaRelations = relations(apiQuota, ({ one }) => ({
+  user: one(users, {
+    fields: [apiQuota.userId],
+    references: [users.id],
+  }),
+}));
+
+// Create schemas for the new table
+export const insertApiQuotaSchema = createInsertSchema(apiQuota);
+export const selectApiQuotaSchema = createSelectSchema(apiQuota);
+export type ApiQuota = typeof apiQuota.$inferSelect;
+export type NewApiQuota = typeof apiQuota.$inferInsert;
+
+
 // Relations
 export const organizationsRelations = relations(organizations, ({ many }) => ({
   users: many(users),

@@ -5,6 +5,7 @@ import "react-resizable/css/styles.css";
 import { Card } from "@/components/ui/card";
 import StudyProgressWidget from "./widgets/StudyProgressWidget";
 import { useToast } from "@/hooks/use-toast";
+import QuotaWidget from "./widgets/QuotaWidget";
 
 interface LayoutItem {
   i: string;
@@ -22,6 +23,7 @@ const defaultLayout: LayoutItem[] = [
   { i: "deadlines", x: 6, y: 0, w: 6, h: 4, minW: 4, minH: 3 },
   { i: "activities", x: 0, y: 4, w: 8, h: 4, minW: 4, minH: 3 },
   { i: "quickActions", x: 8, y: 4, w: 4, h: 4, minW: 3, minH: 3 },
+  { i: "quota", x: 0, y: 8, w: 6, h: 3, minW: 3, minH: 2 }, // Add quota widget
 ];
 
 export default function DashboardLayout() {
@@ -123,6 +125,14 @@ export default function DashboardLayout() {
             <h3 className="text-lg font-semibold mb-4">Common Tasks</h3>
             {/* Add QuickActionsWidget component here */}
             <p className="text-muted-foreground">No quick actions available</p>
+          </div>
+        </Card>
+        <Card key="quota" className="overflow-hidden">
+          <div className="widget-header p-4 bg-background border-b cursor-move">
+            API Usage
+          </div>
+          <div className="p-4">
+            <QuotaWidget />
           </div>
         </Card>
       </GridLayout>

@@ -1,5 +1,8 @@
 import OpenAI from "openai";
 import Logger from "../utils/logger";
+import { db } from "@db";
+import { apiQuota } from "@db/schema";
+import { eq } from "drizzle-orm";
 
 if (!process.env.OPENAI_API_KEY) {
   throw new Error("OPENAI_API_KEY environment variable is not set");
@@ -62,7 +65,47 @@ async function retryOperation<T>(
   }
 }
 
-export async function summarizeContent(content: string, level: string = 'high_school'): Promise<AnalysisResult> {
+// Add function to update quota usage
+async function updateQuotaUsage(userId: number, tokenCount: number) {
+  const today = new Date();
+  const [userQuota] = await db
+    .select()
+    .from(apiQuota)
+    .where(eq(apiQuota.userId, userId))
+    .limit(1);
+
+  if (!userQuota || new Date(userQuota.resetAt) < today) {
+    // Create new quota or reset existing one
+    await db
+      .insert(apiQuota)
+      .values({
+        userId,
+        tokenCount,
+        callCount: 1,
+        resetAt: new Date(today.getFullYear(), today.getMonth() + 1, 1), // Reset on first of next month
+      })
+      .onConflictDoUpdate({
+        target: [apiQuota.userId],
+        set: {
+          tokenCount,
+          callCount: 1,
+          resetAt: new Date(today.getFullYear(), today.getMonth() + 1, 1),
+        },
+      });
+  } else {
+    // Update existing quota
+    await db
+      .update(apiQuota)
+      .set({
+        tokenCount: userQuota.tokenCount + tokenCount,
+        callCount: userQuota.callCount + 1,
+      })
+      .where(eq(apiQuota.userId, userId));
+  }
+}
+
+// Update summarizeContent function to track usage
+export async function summarizeContent(content: string, level: string = 'high_school', userId: number): Promise<AnalysisResult> {
   try {
     Logger.info("Summarizing content with OpenAI", { level, contentLength: content.length });
 
@@ -73,6 +116,7 @@ export async function summarizeContent(content: string, level: string = 'high_sc
     const chunks = chunkText(content);
     Logger.info(`Content split into ${chunks.length} chunks`);
 
+    let totalTokens = 0;
     let summaries: AnalysisResult[] = [];
 
     for (const chunk of chunks) {
@@ -93,6 +137,9 @@ export async function summarizeContent(content: string, level: string = 'high_sc
             temperature: 0.7
           });
         });
+
+        // Track token usage
+        totalTokens += response.usage?.total_tokens || 0;
 
         Logger.info("Chunk summarization completed", {
           status: 'success',
@@ -118,6 +165,9 @@ export async function summarizeContent(content: string, level: string = 'high_sc
         throw error;
       }
     }
+
+    // Update quota usage
+    await updateQuotaUsage(userId, totalTokens);
 
     const combinedSummary = {
       summary: summaries.map(s => s.summary).join('\n').trim(),
@@ -147,4 +197,15 @@ export async function summarizeContent(content: string, level: string = 'high_sc
 
     throw new Error("Failed to summarize content: " + (error as Error).message);
   }
+}
+
+// Add endpoint to get quota information
+export async function getQuotaInfo(userId: number) {
+  const [quota] = await db
+    .select()
+    .from(apiQuota)
+    .where(eq(apiQuota.userId, userId))
+    .limit(1);
+
+  return quota;
 }
