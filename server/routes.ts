@@ -70,6 +70,93 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
+  // New endpoint for updating a board
+  app.put("/api/boards/:id", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      Logger.warn("Unauthorized board update attempt", {
+        ip: req.ip,
+        headers: req.headers,
+        boardId: req.params.id,
+      });
+      return res.status(401).send("Not authenticated");
+    }
+
+    try {
+      const [updatedBoard] = await db
+        .update(boards)
+        .set({
+          name: req.body.name,
+          description: req.body.description,
+          professor: req.body.professor,
+          schedule: req.body.schedule,
+          syllabus: req.body.syllabus,
+          isArchived: req.body.isArchived,
+        })
+        .where(eq(boards.id, parseInt(req.params.id)))
+        .returning();
+
+      if (!updatedBoard) {
+        Logger.warn("Board not found for update", {
+          boardId: req.params.id,
+          userId: req.user?.id,
+        });
+        return res.status(404).send("Board not found");
+      }
+
+      Logger.info("Board updated successfully", {
+        boardId: updatedBoard.id,
+        userId: req.user?.id,
+      });
+      res.json(updatedBoard);
+    } catch (error) {
+      Logger.error("Error updating board", error as Error, {
+        userId: req.user?.id,
+        boardId: req.params.id,
+        payload: req.body,
+      });
+      res.status(500).send("Failed to update board");
+    }
+  });
+
+  // New endpoint for deleting a board
+  app.delete("/api/boards/:id", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      Logger.warn("Unauthorized board deletion attempt", {
+        ip: req.ip,
+        headers: req.headers,
+        boardId: req.params.id,
+      });
+      return res.status(401).send("Not authenticated");
+    }
+
+    try {
+      const [deletedBoard] = await db
+        .delete(boards)
+        .where(eq(boards.id, parseInt(req.params.id)))
+        .returning();
+
+      if (!deletedBoard) {
+        Logger.warn("Board not found for deletion", {
+          boardId: req.params.id,
+          userId: req.user?.id,
+        });
+        return res.status(404).send("Board not found");
+      }
+
+      Logger.info("Board deleted successfully", {
+        boardId: req.params.id,
+        userId: req.user?.id,
+      });
+      res.json({ message: "Board deleted successfully" });
+    } catch (error) {
+      Logger.error("Error deleting board", error as Error, {
+        userId: req.user?.id,
+        boardId: req.params.id,
+      });
+      res.status(500).send("Failed to delete board");
+    }
+  });
+
   // Tiles API
   app.get("/api/boards/:boardId/tiles", async (req, res) => {
     if (!req.isAuthenticated()) {
@@ -155,7 +242,118 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  // Schedule Optimization API
+  // New endpoint for updating a tile
+  app.put("/api/boards/:boardId/tiles/:id", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      Logger.warn("Unauthorized tile update attempt", {
+        ip: req.ip,
+        headers: req.headers,
+        boardId: req.params.boardId,
+        tileId: req.params.id,
+      });
+      return res.status(401).send("Not authenticated");
+    }
+
+    try {
+      let dueDate = null;
+      if (req.body.dueDate) {
+        dueDate = new Date(req.body.dueDate);
+        if (isNaN(dueDate.getTime())) {
+          Logger.warn("Invalid due date format for update", {
+            dueDate: req.body.dueDate,
+            userId: req.user?.id,
+            boardId: req.params.boardId,
+            tileId: req.params.id,
+          });
+          return res.status(400).send("Invalid due date format");
+        }
+      }
+
+      const [updatedTile] = await db
+        .update(tiles)
+        .set({
+          title: req.body.title,
+          description: req.body.description,
+          dueDate: dueDate,
+          status: req.body.status,
+          priority: req.body.priority,
+          tags: req.body.tags,
+          notes: req.body.notes,
+          grade: req.body.grade,
+        })
+        .where(eq(tiles.id, parseInt(req.params.id)))
+        .returning();
+
+      if (!updatedTile) {
+        Logger.warn("Tile not found for update", {
+          tileId: req.params.id,
+          boardId: req.params.boardId,
+          userId: req.user?.id,
+        });
+        return res.status(404).send("Tile not found");
+      }
+
+      Logger.info("Tile updated successfully", {
+        tileId: updatedTile.id,
+        boardId: req.params.boardId,
+        userId: req.user?.id,
+      });
+      res.json(updatedTile);
+    } catch (error) {
+      Logger.error("Error updating tile", error as Error, {
+        userId: req.user?.id,
+        boardId: req.params.boardId,
+        tileId: req.params.id,
+        payload: req.body,
+      });
+      res.status(500).send("Failed to update tile");
+    }
+  });
+
+  // New endpoint for deleting a tile
+  app.delete("/api/boards/:boardId/tiles/:id", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      Logger.warn("Unauthorized tile deletion attempt", {
+        ip: req.ip,
+        headers: req.headers,
+        boardId: req.params.boardId,
+        tileId: req.params.id,
+      });
+      return res.status(401).send("Not authenticated");
+    }
+
+    try {
+      const [deletedTile] = await db
+        .delete(tiles)
+        .where(eq(tiles.id, parseInt(req.params.id)))
+        .returning();
+
+      if (!deletedTile) {
+        Logger.warn("Tile not found for deletion", {
+          tileId: req.params.id,
+          boardId: req.params.boardId,
+          userId: req.user?.id,
+        });
+        return res.status(404).send("Tile not found");
+      }
+
+      Logger.info("Tile deleted successfully", {
+        tileId: req.params.id,
+        boardId: req.params.boardId,
+        userId: req.user?.id,
+      });
+      res.json({ message: "Tile deleted successfully" });
+    } catch (error) {
+      Logger.error("Error deleting tile", error as Error, {
+        userId: req.user?.id,
+        boardId: req.params.boardId,
+        tileId: req.params.id,
+      });
+      res.status(500).send("Failed to delete tile");
+    }
+  });
+
+  // Schedule Optimization API (unchanged)
   app.post("/api/boards/:boardId/optimize", async (req, res) => {
     if (!req.isAuthenticated()) {
       Logger.warn("Unauthorized schedule optimization attempt", {

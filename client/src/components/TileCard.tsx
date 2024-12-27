@@ -1,8 +1,19 @@
 import { type Tile } from "@db/schema";
 import { Card, CardHeader, CardContent, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Calendar, Link as LinkIcon, Star, Tag, Clock, ListOrdered } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Calendar, Link as LinkIcon, Star, Tag, Clock, ListOrdered, MoreVertical, Edit, Trash2 } from "lucide-react";
 import { format } from "date-fns";
+import { useTiles } from "@/hooks/use-tiles";
+import { useToast } from "@/hooks/use-toast";
+import { useState } from "react";
+import EditTileDialog from "./EditTileDialog";
 
 interface BoardCardProps {
   tile: Tile;
@@ -22,6 +33,26 @@ const statusColors = {
 };
 
 export default function TileCard({ tile }: BoardCardProps) {
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const { deleteTile } = useTiles(tile.boardId);
+  const { toast } = useToast();
+
+  const handleDelete = async () => {
+    try {
+      await deleteTile(tile.id);
+      toast({
+        title: "Success",
+        description: "Study unit deleted successfully",
+      });
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to delete study unit",
+      });
+    }
+  };
+
   // Parse external links from JSON
   const externalLinks: string[] = Array.isArray(tile.externalLinks) 
     ? tile.externalLinks 
@@ -30,94 +61,123 @@ export default function TileCard({ tile }: BoardCardProps) {
       : []);
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex justify-between items-start gap-4">
-          <h3 className="font-semibold">{tile.title}</h3>
-          <Badge 
-            className={statusColors[tile.status as keyof typeof statusColors]}
-          >
-            {tile.status?.replace("_", " ")}
-          </Badge>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {tile.description && (
-          <p className="text-sm text-muted-foreground">
-            {tile.description}
-          </p>
-        )}
-
-        <div className="space-y-2">
-          {tile.dueDate && (
-            <div className="flex items-center text-sm">
-              <Calendar className="mr-2 h-4 w-4" />
-              {format(new Date(tile.dueDate), "PPP")}
+    <>
+      <Card>
+        <CardHeader>
+          <div className="flex justify-between items-start gap-4">
+            <div>
+              <h3 className="font-semibold">{tile.title}</h3>
             </div>
-          )}
-
-          {tile.priority && (
-            <div className="flex items-center text-sm">
-              <Star className="mr-2 h-4 w-4" />
-              <Badge className={priorityColors[tile.priority as keyof typeof priorityColors]}>
-                {tile.priority}
-              </Badge>
-            </div>
-          )}
-
-          {tile.recommendedTimeOfDay && (
-            <div className="flex items-center text-sm">
-              <Clock className="mr-2 h-4 w-4" />
-              Recommended: {tile.recommendedTimeOfDay}
-              {tile.estimatedDuration && ` (${tile.estimatedDuration} min)`}
-            </div>
-          )}
-
-          {tile.optimalStudyOrder !== null && tile.optimalStudyOrder !== undefined && (
-            <div className="flex items-center text-sm">
-              <ListOrdered className="mr-2 h-4 w-4" />
-              Study Order: {tile.optimalStudyOrder + 1}
-            </div>
-          )}
-
-          {tile.tags && tile.tags.length > 0 && (
-            <div className="flex items-center gap-2 flex-wrap">
-              <Tag className="h-4 w-4" />
-              {tile.tags.map((tag: string, index: number) => (
-                <Badge key={index} variant="secondary">
-                  {tag}
-                </Badge>
-              ))}
-            </div>
-          )}
-
-          {externalLinks.length > 0 && (
             <div className="flex items-center gap-2">
-              <LinkIcon className="h-4 w-4" />
-              <div className="flex flex-wrap gap-2">
-                {externalLinks.map((link: string, index: number) => (
-                  <a
-                    key={index}
-                    href={link}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm text-primary hover:underline"
-                  >
-                    Resource {index + 1}
-                  </a>
+              <Badge 
+                className={statusColors[tile.status as keyof typeof statusColors]}
+              >
+                {tile.status?.replace("_", " ")}
+              </Badge>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon">
+                    <MoreVertical className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => setIsEditOpen(true)}>
+                    <Edit className="mr-2 h-4 w-4" />
+                    Edit
+                  </DropdownMenuItem>
+                  <DropdownMenuItem className="text-red-600" onClick={handleDelete}>
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Delete
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {tile.description && (
+            <p className="text-sm text-muted-foreground">
+              {tile.description}
+            </p>
+          )}
+
+          <div className="space-y-2">
+            {tile.dueDate && (
+              <div className="flex items-center text-sm">
+                <Calendar className="mr-2 h-4 w-4" />
+                {format(new Date(tile.dueDate), "PPP")}
+              </div>
+            )}
+
+            {tile.priority && (
+              <div className="flex items-center text-sm">
+                <Star className="mr-2 h-4 w-4" />
+                <Badge className={priorityColors[tile.priority as keyof typeof priorityColors]}>
+                  {tile.priority}
+                </Badge>
+              </div>
+            )}
+
+            {tile.recommendedTimeOfDay && (
+              <div className="flex items-center text-sm">
+                <Clock className="mr-2 h-4 w-4" />
+                Recommended: {tile.recommendedTimeOfDay}
+                {tile.estimatedDuration && ` (${tile.estimatedDuration} min)`}
+              </div>
+            )}
+
+            {tile.optimalStudyOrder !== null && tile.optimalStudyOrder !== undefined && (
+              <div className="flex items-center text-sm">
+                <ListOrdered className="mr-2 h-4 w-4" />
+                Study Order: {tile.optimalStudyOrder + 1}
+              </div>
+            )}
+
+            {tile.tags && tile.tags.length > 0 && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <Tag className="h-4 w-4" />
+                {tile.tags.map((tag: string, index: number) => (
+                  <Badge key={index} variant="secondary">
+                    {tag}
+                  </Badge>
                 ))}
               </div>
-            </div>
-          )}
-        </div>
-      </CardContent>
-      {tile.grade && (
-        <CardFooter>
-          <div className="text-sm font-medium">
-            Grade: {tile.grade}
+            )}
+
+            {externalLinks.length > 0 && (
+              <div className="flex items-center gap-2">
+                <LinkIcon className="h-4 w-4" />
+                <div className="flex flex-wrap gap-2">
+                  {externalLinks.map((link: string, index: number) => (
+                    <a
+                      key={index}
+                      href={link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm text-primary hover:underline"
+                    >
+                      Resource {index + 1}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
-        </CardFooter>
-      )}
-    </Card>
+        </CardContent>
+        {tile.grade && (
+          <CardFooter>
+            <div className="text-sm font-medium">
+              Grade: {tile.grade}
+            </div>
+          </CardFooter>
+        )}
+      </Card>
+
+      <EditTileDialog
+        tile={tile}
+        open={isEditOpen}
+        onOpenChange={setIsEditOpen}
+      />
+    </>
   );
 }
