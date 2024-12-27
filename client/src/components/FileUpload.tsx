@@ -117,6 +117,20 @@ export default function FileUpload({ boardId, children }: FileUploadProps) {
     if (!newTagName.trim()) return;
 
     try {
+      // Check if tag already exists
+      const tagExists = tags?.some(
+        tag => tag.name.toLowerCase() === newTagName.trim().toLowerCase()
+      );
+
+      if (tagExists) {
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: "A tag with this name already exists",
+        });
+        return;
+      }
+
       await createTag({
         name: newTagName.trim(),
         isStudyUnitTag: false,
