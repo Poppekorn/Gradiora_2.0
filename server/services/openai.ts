@@ -95,7 +95,13 @@ async function processChunks(chunks: string[], userId: number, level: string): P
       messages: [
         {
           role: "system",
-          content: `You are a professional educator summarizing content for ${level} students. Focus only on explaining the main concepts and key points. Your summary should be clear, concise, and appropriate for the education level. Do not include any technical details about file formats or data structure.`
+          content: `You are an educational content summarizer for ${level} students. Create a clear, focused summary of the content followed by a detailed explanation. Focus exclusively on the main ideas, key points, and important concepts in the text. Do not mention anything about file formats, document structure, or technical details.
+
+When summarizing:
+- Extract and present the core message and main points
+- Use clear, level-appropriate language
+- Organize information logically
+- Remove any technical metadata or format-related content`
         },
         {
           role: "user",
@@ -120,9 +126,16 @@ async function processChunks(chunks: string[], userId: number, level: string): P
     };
   }));
 
+  // Combine summaries more intelligently
+  const combinedSummary = summaries.map(s => s.summary).join("\n").trim();
+  const combinedExplanation = summaries.map(s => s.explanation)
+    .filter(exp => exp.length > 0) // Remove empty explanations
+    .join("\n\n")
+    .trim();
+
   return {
-    summary: summaries.map(s => s.summary).join("\n").trim(),
-    explanation: summaries.map(s => s.explanation).join("\n\n").trim()
+    summary: combinedSummary,
+    explanation: combinedExplanation
   };
 }
 
