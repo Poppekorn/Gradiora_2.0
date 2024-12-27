@@ -44,6 +44,7 @@ export default function BoardCard({ board }: BoardCardProps) {
         description: "Class and all associated study units deleted successfully",
       });
     } catch (error) {
+      console.error("Error deleting board:", error);
       toast({
         variant: "destructive",
         title: "Error",
@@ -57,10 +58,10 @@ export default function BoardCard({ board }: BoardCardProps) {
     if (
       (e.target as HTMLElement).closest('button, a, [role="menuitem"]')
     ) {
-      e.stopPropagation();
       return;
     }
-    setLocation(`/board/${board.id}`);
+    e.preventDefault();
+    setLocation(`/boards/${board.id}`);
   };
 
   return (
@@ -93,19 +94,29 @@ export default function BoardCard({ board }: BoardCardProps) {
                   <Button 
                     variant="ghost" 
                     size="icon"
-                    onClick={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
                   >
                     <MoreVertical className="h-4 w-4" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-                  <DropdownMenuItem onClick={() => setIsEditOpen(true)}>
+                <DropdownMenuContent align="end" onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}>
+                  <DropdownMenuItem onClick={() => {
+                    setIsEditOpen(true);
+                  }}>
                     <Edit className="mr-2 h-4 w-4" />
                     Edit
                   </DropdownMenuItem>
                   <DropdownMenuItem 
                     className="text-red-600" 
-                    onClick={() => setIsDeleteDialogOpen(true)}
+                    onClick={() => {
+                      setIsDeleteDialogOpen(true);
+                    }}
                   >
                     <Trash2 className="mr-2 h-4 w-4" />
                     Delete
@@ -136,7 +147,11 @@ export default function BoardCard({ board }: BoardCardProps) {
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-primary hover:underline"
-                  onClick={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    window.open(board.syllabus, '_blank');
+                  }}
                 >
                   View Syllabus
                 </a>
@@ -160,7 +175,7 @@ export default function BoardCard({ board }: BoardCardProps) {
       />
 
       <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent onClick={(e) => e.stopPropagation()}>
           <AlertDialogHeader>
             <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
             <AlertDialogDescription>

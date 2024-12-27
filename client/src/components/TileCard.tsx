@@ -8,7 +8,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Calendar, Link as LinkIcon, Star, Tag, Clock, ListOrdered, MoreVertical, Edit, Trash2, Brain, GraduationCap } from "lucide-react";
+import { Calendar, Link as LinkIcon, Star, Tag, Clock, ListOrdered, MoreVertical, Edit, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import { useTiles } from "@/hooks/use-tiles";
 import { useToast } from "@/hooks/use-toast";
@@ -41,12 +41,13 @@ export default function TileCard({ tile }: BoardCardProps) {
   const { boards } = useBoards();
   const { toast } = useToast();
 
-  // Get parent board's color
   const parentBoard = boards?.find(board => board.id === tile.boardId);
   const parentColor = parentBoard?.color || "#E2E8F0";
 
   const handleDelete = async (e: React.MouseEvent) => {
-    e.stopPropagation(); // Prevent navigation
+    e.preventDefault();
+    e.stopPropagation();
+
     try {
       await deleteTile(tile.id);
       toast({
@@ -54,6 +55,7 @@ export default function TileCard({ tile }: BoardCardProps) {
         description: "Study unit deleted successfully",
       });
     } catch (error) {
+      console.error("Error deleting tile:", error);
       toast({
         variant: "destructive",
         title: "Error",
@@ -63,8 +65,14 @@ export default function TileCard({ tile }: BoardCardProps) {
   };
 
   const handleEdit = (e: React.MouseEvent) => {
-    e.stopPropagation(); // Prevent navigation
+    e.preventDefault();
+    e.stopPropagation();
     setIsEditOpen(true);
+  };
+
+  const handleCardClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setLocation(`/boards/${tile.boardId}/tiles/${tile.id}`);
   };
 
   // Parse external links from JSON
@@ -82,7 +90,7 @@ export default function TileCard({ tile }: BoardCardProps) {
           borderColor: parentColor ? `hsl(from ${parentColor} h s calc(l - 10%))` : undefined
         }}
         className="hover:shadow-lg transition-shadow cursor-pointer"
-        onClick={() => setLocation(`/boards/${tile.boardId}/tiles/${tile.id}`)}
+        onClick={handleCardClick}
       >
         <CardHeader>
           <div className="flex justify-between items-start gap-4">
@@ -96,12 +104,18 @@ export default function TileCard({ tile }: BoardCardProps) {
                 {tile.status?.replace("_", " ")}
               </Badge>
               <DropdownMenu>
-                <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+                <DropdownMenuTrigger asChild onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}>
                   <Button variant="ghost" size="icon">
                     <MoreVertical className="h-4 w-4" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                <DropdownMenuContent align="end" onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}>
                   <DropdownMenuItem onClick={handleEdit}>
                     <Edit className="mr-2 h-4 w-4" />
                     Edit
@@ -176,7 +190,11 @@ export default function TileCard({ tile }: BoardCardProps) {
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-sm text-primary hover:underline"
-                      onClick={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        window.open(link, '_blank');
+                      }}
                     >
                       Resource {index + 1}
                     </a>
