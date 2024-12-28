@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import Logger from "../utils/logger";
 import { sanitizeContent, validateContentSafety } from "./sanitization";
+import { extractTextFromImage, analyzeImageContent } from "./vision";
 
 const __filename = fileURLToPath(import.meta.url);
 const currentDir = dirname(__filename);
@@ -18,7 +19,42 @@ interface ProcessedDocument {
     method?: string;
     extracted_text?: string;
     ocr_confidence?: number;
+    summary?: string;
+    explanation?: string;
   };
+}
+
+async function processImageWithVision(filePath: string): Promise<ProcessedDocument> {
+  try {
+    Logger.info("[ImageProcessor] Starting OpenAI Vision processing", { filePath });
+
+    const [textResult, analysisResult] = await Promise.all([
+      extractTextFromImage(filePath),
+      analyzeImageContent(filePath)
+    ]);
+
+    Logger.info("[ImageProcessor] Vision API processing completed", {
+      hasText: Boolean(textResult.text),
+      confidence: textResult.confidence,
+      hasSummary: Boolean(analysisResult.summary)
+    });
+
+    return {
+      type: 'image',
+      content: {
+        extracted_text: textResult.text,
+        ocr_confidence: textResult.confidence,
+        summary: analysisResult.summary,
+        explanation: analysisResult.explanation
+      }
+    };
+  } catch (error) {
+    Logger.error("[ImageProcessor] Vision API processing failed", {
+      error: error instanceof Error ? error.message : String(error),
+      filePath
+    });
+    throw error;
+  }
 }
 
 async function runPythonProcessor(filePath: string): Promise<ProcessedDocument> {
@@ -111,17 +147,30 @@ export async function extractTextFromDocument(filePath: string): Promise<string>
       throw new Error("File not found");
     }
 
-    // Process document using Python implementation
-    const processedDoc = await runPythonProcessor(filePath);
+    const extension = path.extname(filePath).toLowerCase();
+    const isImage = ['.jpg', '.jpeg', '.png', '.webp'].includes(extension);
+
+    let processedDoc: ProcessedDocument;
+    if (isImage) {
+      processedDoc = await processImageWithVision(filePath);
+    } else {
+      processedDoc = await runPythonProcessor(filePath);
+    }
+
     let extractedText = '';
 
-    // Extract text based on document type and structure
     if (processedDoc.type === 'doc' || processedDoc.type === 'docx' || processedDoc.type === 'text') {
       extractedText = processedDoc.content.text || '';
     } else if (processedDoc.type === 'pdf') {
       extractedText = (processedDoc.content.pages || []).join('\n\n');
     } else if (processedDoc.type === 'image') {
       extractedText = processedDoc.content.extracted_text || '';
+      if (processedDoc.content.summary) {
+        extractedText += `\n\nSummary:\n${processedDoc.content.summary}`;
+      }
+      if (processedDoc.content.explanation) {
+        extractedText += `\n\nDetailed Explanation:\n${processedDoc.content.explanation}`;
+      }
     }
 
     if (!extractedText || extractedText.trim().length === 0) {
