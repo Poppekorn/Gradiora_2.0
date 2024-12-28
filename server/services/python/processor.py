@@ -17,37 +17,42 @@ def process_doc_file(file_path: str) -> dict:
             return {"error": "File not found"}
 
         with open(file_path, 'rb') as doc_file:
-            # Try different conversion methods in sequence
-            methods = [
-                ('markdown', lambda f: mammoth.convert_to_markdown(f)),
-                ('raw_text', lambda f: mammoth.extract_raw_text(f)),
-                ('html', lambda f: mammoth.convert_to_html(f))
-            ]
+            # Test markdown conversion first
+            print("Debug: Attempting markdown conversion...", file=sys.stderr)
+            try:
+                result = mammoth.convert_to_markdown(doc_file)
+                text = result.value.strip()
 
-            for method_name, converter in methods:
-                try:
-                    print(f"Debug: Attempting {method_name} conversion...", file=sys.stderr)
-                    doc_file.seek(0)
-                    result = converter(doc_file)
-                    text = result.value.strip()
-
-                    if text:
-                        print(f"Debug: Successfully extracted text using {method_name}. Length: {len(text)}", file=sys.stderr)
-                        return {
-                            "type": "doc",
-                            "content": {
-                                "text": text,
-                                "messages": [f"Extracted using {method_name} method"]
-                            }
+                if text:
+                    print(f"Debug: Markdown conversion successful. Text length: {len(text)}", file=sys.stderr)
+                    return {
+                        "type": "doc",
+                        "content": {
+                            "text": text
                         }
-                    else:
-                        print(f"Debug: {method_name} conversion produced empty result", file=sys.stderr)
-                except Exception as e:
-                    print(f"Debug: {method_name} conversion failed: {str(e)}", file=sys.stderr)
-                    continue
+                    }
+            except Exception as e:
+                print(f"Debug: Markdown conversion failed: {str(e)}", file=sys.stderr)
 
-        # If all methods fail
-        error_msg = "Failed to extract text using any available method"
+            # Try raw text extraction as fallback
+            print("Debug: Attempting raw text extraction...", file=sys.stderr)
+            doc_file.seek(0)
+            try:
+                result = mammoth.extract_raw_text(doc_file)
+                text = result.value.strip()
+
+                if text:
+                    print(f"Debug: Raw text extraction successful. Text length: {len(text)}", file=sys.stderr)
+                    return {
+                        "type": "doc",
+                        "content": {
+                            "text": text
+                        }
+                    }
+            except Exception as e:
+                print(f"Debug: Raw text extraction failed: {str(e)}", file=sys.stderr)
+
+        error_msg = "Failed to extract text from DOC file"
         print(f"Debug: {error_msg}", file=sys.stderr)
         return {"error": error_msg}
 
@@ -58,7 +63,7 @@ def process_doc_file(file_path: str) -> dict:
         return {"error": error_msg}
 
 def process_document(file_path: str) -> dict:
-    """Process document and extract text with structure."""
+    """Process document and extract text."""
     try:
         if not os.path.exists(file_path):
             return {"error": "File not found"}
@@ -112,10 +117,8 @@ def process_document(file_path: str) -> dict:
         else:
             result = {"error": f"Unsupported file format: {ext}"}
 
-        # Ensure the result is JSON serializable and output is properly formatted
         json_result = json.dumps(result)
-        print("Debug: Final JSON result:", json_result, file=sys.stderr)
-        print(json_result)  # This is the only line that goes to stdout
+        print(json_result)  # Only JSON output goes to stdout
         return result
 
     except Exception as e:
@@ -125,113 +128,6 @@ def process_document(file_path: str) -> dict:
         json_error = json.dumps({"error": error_msg})
         print(json_error)
         return {"error": error_msg}
-
-def extract_text_from_docx(docx_path: str) -> str:
-    """Extract text from DOCX files."""
-    try:
-        text = ""
-        doc = Document(docx_path)
-        for paragraph in doc.paragraphs:
-            text += paragraph.text + '\n'
-
-        # Check for empty content
-        if not text.strip():
-            raise Exception("No text content found in DOCX file")
-
-        return text
-    except Exception as e:
-        raise Exception(f"Error extracting text from DOCX: {str(e)}")
-
-def extract_text_from_pdf(pdf_path: str) -> str:
-    """Extract text from PDF files."""
-    try:
-        text = ""
-        with open(pdf_path, 'rb') as file:
-            reader = PyPDF2.PdfReader(file)
-            for page in reader.pages:
-                text += page.extract_text() + '\n'
-
-        # Check for empty content
-        if not text.strip():
-            raise Exception("No text content found in PDF file")
-
-        return text
-    except Exception as e:
-        raise Exception(f"Error extracting text from PDF: {str(e)}")
-
-def extract_text_from_doc(doc_path: str) -> str:
-    """Extract text from DOC files using mammoth."""
-    try:
-        # First try using mammoth's raw text extraction
-        with open(doc_path, 'rb') as doc_file:
-            try:
-                result = mammoth.extract_raw_text(doc_file)
-                text = result.value
-
-                # If text is empty, try with different options
-                if not text.strip():
-                    doc_file.seek(0)
-                    result = mammoth.extract_raw_text(doc_file, convert_options={
-                        "preserve_empty_paragraphs": True,
-                        "include_default_style_map": True
-                    })
-                    text = result.value
-
-                if not text.strip():
-                    raise Exception("No text content found in DOC file")
-
-                return text
-
-            except Exception as mammoth_error:
-                # If mammoth fails, try reading as binary and decode
-                doc_file.seek(0)
-                content = doc_file.read()
-                try:
-                    # Try different encodings
-                    for encoding in ['utf-8', 'latin-1', 'cp1252']:
-                        try:
-                            text = content.decode(encoding)
-                            if text.strip():
-                                return text
-                        except:
-                            continue
-                except:
-                    raise Exception(f"Failed to extract text with mammoth: {str(mammoth_error)}")
-
-                raise Exception("Could not extract text content from DOC file")
-
-    except Exception as e:
-        raise Exception(f"Error extracting text from DOC: {str(e)}")
-
-def summarize_text(text: str, education_level: str = "high_school") -> Dict[str, str]:
-    """Summarize text using OpenAI API."""
-    try:
-        response = openai.chat.completions.create(
-            model="gpt-4",
-            messages=[
-                {
-                    "role": "system",
-                    "content": f"You are an expert academic content analyzer for {education_level} students. "
-                              "Process the text and provide a concise analysis in JSON format with two sections: "
-                              "summary (key points as bullet points) and explanation (detailed analysis connecting the concepts)."
-                },
-                {"role": "user", "content": text}
-            ],
-            temperature=0.3,
-            response_format={"type": "json_object"}
-        )
-
-        result = json.loads(response.choices[0].message.content)
-        return {
-            "summary": result.get("summary", ""),
-            "explanation": result.get("explanation", "")
-        }
-    except Exception as e:
-        return {
-            "error": f"Summarization failed: {str(e)}",
-            "summary": "",
-            "explanation": ""
-        }
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
