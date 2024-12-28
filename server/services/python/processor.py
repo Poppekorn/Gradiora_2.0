@@ -7,9 +7,6 @@ import mammoth
 import openai
 from typing import Dict, Union, Optional
 
-# Set up OpenAI client
-openai.api_key = os.getenv("OPENAI_API_KEY")
-
 def extract_text_from_docx(docx_path: str) -> str:
     """Extract text from DOCX files."""
     try:
@@ -17,6 +14,11 @@ def extract_text_from_docx(docx_path: str) -> str:
         doc = Document(docx_path)
         for paragraph in doc.paragraphs:
             text += paragraph.text + '\n'
+
+        # Check for empty content
+        if not text.strip():
+            raise Exception("No text content found in DOCX file")
+
         return text
     except Exception as e:
         raise Exception(f"Error extracting text from DOCX: {str(e)}")
@@ -29,6 +31,11 @@ def extract_text_from_pdf(pdf_path: str) -> str:
             reader = PyPDF2.PdfReader(file)
             for page in reader.pages:
                 text += page.extract_text() + '\n'
+
+        # Check for empty content
+        if not text.strip():
+            raise Exception("No text content found in PDF file")
+
         return text
     except Exception as e:
         raise Exception(f"Error extracting text from PDF: {str(e)}")
@@ -36,9 +43,44 @@ def extract_text_from_pdf(pdf_path: str) -> str:
 def extract_text_from_doc(doc_path: str) -> str:
     """Extract text from DOC files using mammoth."""
     try:
-        with open(doc_path, 'rb') as docx_file:
-            result = mammoth.extract_raw_text(docx_file)
-            return result.value
+        # First try using mammoth's raw text extraction
+        with open(doc_path, 'rb') as doc_file:
+            try:
+                result = mammoth.extract_raw_text(doc_file)
+                text = result.value
+
+                # If text is empty, try with different options
+                if not text.strip():
+                    doc_file.seek(0)
+                    result = mammoth.extract_raw_text(doc_file, convert_options={
+                        "preserve_empty_paragraphs": True,
+                        "include_default_style_map": True
+                    })
+                    text = result.value
+
+                if not text.strip():
+                    raise Exception("No text content found in DOC file")
+
+                return text
+
+            except Exception as mammoth_error:
+                # If mammoth fails, try reading as binary and decode
+                doc_file.seek(0)
+                content = doc_file.read()
+                try:
+                    # Try different encodings
+                    for encoding in ['utf-8', 'latin-1', 'cp1252']:
+                        try:
+                            text = content.decode(encoding)
+                            if text.strip():
+                                return text
+                        except:
+                            continue
+                except:
+                    raise Exception(f"Failed to extract text with mammoth: {str(mammoth_error)}")
+
+                raise Exception("Could not extract text content from DOC file")
+
     except Exception as e:
         raise Exception(f"Error extracting text from DOC: {str(e)}")
 
@@ -50,6 +92,8 @@ def process_document(file_path: str) -> Dict[str, Union[str, Dict[str, str]]]:
 
         _, file_extension = os.path.splitext(file_path)
         ext = file_extension.lower()
+
+        print(f"Processing file: {file_path} with extension: {ext}")  # Debug log
 
         # Extract text based on file type
         if ext == '.pdf':
@@ -68,10 +112,13 @@ def process_document(file_path: str) -> Dict[str, Union[str, Dict[str, str]]]:
         if not text or len(text.strip()) == 0:
             return {"error": "No text content extracted"}
 
+        print(f"Successfully extracted text, length: {len(text)}")  # Debug log
         return {"text": text}
 
     except Exception as e:
-        return {"error": f"Processing failed: {str(e)}"}
+        error_msg = f"Processing failed: {str(e)}"
+        print(f"Error: {error_msg}")  # Debug log
+        return {"error": error_msg}
 
 def summarize_text(text: str, education_level: str = "high_school") -> Dict[str, str]:
     """Summarize text using OpenAI API."""
@@ -90,7 +137,7 @@ def summarize_text(text: str, education_level: str = "high_school") -> Dict[str,
             temperature=0.3,
             response_format={"type": "json_object"}
         )
-        
+
         result = json.loads(response.choices[0].message.content)
         return {
             "summary": result.get("summary", ""),
@@ -105,18 +152,11 @@ def summarize_text(text: str, education_level: str = "high_school") -> Dict[str,
 
 if __name__ == "__main__":
     import sys
-    
+
     if len(sys.argv) < 2:
         print(json.dumps({"error": "No file path provided"}))
         sys.exit(1)
-        
+
     file_path = sys.argv[1]
     result = process_document(file_path)
-    
-    # If text extraction successful and summarize flag is present
-    if len(sys.argv) > 2 and sys.argv[2] == "--summarize" and "text" in result:
-        education_level = sys.argv[3] if len(sys.argv) > 3 else "high_school"
-        summary_result = summarize_text(result["text"], education_level)
-        result.update(summary_result)
-    
     print(json.dumps(result))
