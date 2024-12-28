@@ -9,8 +9,7 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { summarizeContent, getQuotaInfo, getStoredSummary } from "./services/openai";
-import { PDFDocument } from "pdf-lib";
-import mammoth from "mammoth";
+import { extractTextFromDocument, validateDocument } from "./services/document-extractor";
 
 // Ensure uploads directory exists
 const uploadDir = path.join(process.cwd(), 'uploads');
@@ -36,77 +35,29 @@ const upload = multer({
     fileSize: 50 * 1024 * 1024 // 50MB limit
   },
   fileFilter: (req, file, cb) => {
-    const allowedMimes = {
-      'text/plain': true,
-      'text/markdown': true,
-      'application/pdf': true,
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': true,
-      'application/msword': true
+    const allowedTypes = {
+      'text/plain': ['.txt'],
+      'text/markdown': ['.md'],
+      'application/pdf': ['.pdf'],
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+      'application/msword': ['.doc']
     };
 
-    const normalizedMime = file.mimetype.toLowerCase();
-    Logger.info("File upload attempt", {
-      originalMime: file.mimetype,
-      normalizedMime,
-      filename: file.originalname
-    });
+    const ext = path.extname(file.originalname).toLowerCase();
+    const allowedExts = Object.values(allowedTypes).flat();
 
-    if (allowedMimes[normalizedMime] || 
-        normalizedMime.includes('word') || 
-        normalizedMime.includes('doc')) {
+    if (allowedExts.includes(ext)) {
       cb(null, true);
     } else {
-      cb(new Error(`Invalid file type. Only document files are allowed (doc, docx, txt, pdf)`));
+      cb(new Error(`Invalid file type. Supported types are: ${allowedExts.join(', ')}`));
     }
   }
 });
 
-// Helper function to extract text from documents
-async function extractTextFromDocument(filePath: string, mimeType: string): Promise<string> {
-  try {
-    Logger.info("Starting text extraction", { filePath, mimeType });
-
-    if (mimeType.includes('word') || mimeType.includes('doc')) {
-      try {
-        const result = await mammoth.extractRawText({ path: filePath });
-        Logger.info("Word document text extracted", {
-          textLength: result.value.length
-        });
-        return result.value;
-      } catch (docError) {
-        Logger.error("Error with mammoth extraction:", docError);
-        // Fallback for old .doc files
-        const content = await fs.promises.readFile(filePath, 'utf8');
-        return content;
-      }
-    }
-    else if (mimeType === 'text/plain' || mimeType === 'text/markdown') {
-      const content = await fs.promises.readFile(filePath, 'utf-8');
-      return content;
-    }
-    else if (mimeType === 'application/pdf') {
-      // For PDFs, extract text content
-      const pdfBytes = await fs.promises.readFile(filePath);
-      const pdfDoc = await PDFDocument.load(pdfBytes);
-      const pages = pdfDoc.getPages();
-      let text = '';
-      for (const page of pages) {
-        text += await page.getTextContent();
-      }
-      return text;
-    }
-
-    throw new Error("Unsupported file type for text extraction");
-  } catch (error) {
-    Logger.error("Error in text extraction:", error);
-    throw error;
-  }
-}
-
 export function registerRoutes(app: Express): Server {
   setupAuth(app);
 
-  // Add file preview endpoint
+  // File preview endpoint
   app.get("/api/boards/:boardId/files/:fileId/preview", async (req, res) => {
     if (!req.isAuthenticated()) {
       return res.status(401).send("Not authenticated");
@@ -128,48 +79,22 @@ export function registerRoutes(app: Express): Server {
         return res.status(404).send("File not found on disk");
       }
 
-      if (file.mimeType === 'application/pdf') {
-        const pdfBytes = await fs.promises.readFile(filePath);
-        const pdfDoc = await PDFDocument.load(pdfBytes);
-        const pages = pdfDoc.getPages();
+      // Extract first 1000 characters for preview
+      const text = await extractTextFromDocument(filePath);
+      const preview = text.substring(0, 1000);
+      const hasMore = text.length > 1000;
 
-        return res.json({
-          type: 'pdf',
-          pageCount: pages.length,
-          metadata: pdfDoc.getTitle()
-        });
-      }
-      else if (file.mimeType.includes('word') || file.mimeType.includes('doc')) {
-        try {
-          const result = await mammoth.extractRawText({ path: filePath });
-          const previewText = result.value.substring(0, 1000) + (result.value.length > 1000 ? '...' : '');
-          return res.json({
-            type: 'document',
-            preview: previewText,
-            metadata: {
-              totalLength: result.value.length
-            }
-          });
-        } catch (docError) {
-          Logger.error("Error extracting Word document text:", docError);
-          return res.status(500).send("Failed to extract document content");
+      return res.json({
+        type: 'document',
+        preview: preview + (hasMore ? '...' : ''),
+        metadata: {
+          totalLength: text.length,
+          mimeType: file.mimeType
         }
-      }
-      else if (file.mimeType === 'text/plain' || file.mimeType === 'text/markdown') {
-        const content = await fs.promises.readFile(filePath, 'utf-8');
-        const previewText = content.substring(0, 1000) + (content.length > 1000 ? '...' : '');
-        return res.json({
-          type: 'text',
-          preview: previewText,
-          metadata: {
-            totalLength: content.length
-          }
-        });
-      }
+      });
 
-      res.status(400).send("Preview not available for this file type");
     } catch (error) {
-      Logger.error("Error generating file preview:", error);
+      Logger.error("Error generating preview:", error);
       res.status(500).send("Failed to generate preview");
     }
   });
@@ -196,7 +121,8 @@ export function registerRoutes(app: Express): Server {
         return res.status(404).send("File not found on disk");
       }
 
-      const extractedText = await extractTextFromDocument(filePath, file.mimeType);
+      await validateDocument(filePath);
+      const extractedText = await extractTextFromDocument(filePath);
 
       // Store the extracted text
       await db
@@ -221,7 +147,7 @@ export function registerRoutes(app: Express): Server {
       });
     } catch (error) {
       Logger.error("Error converting file:", error);
-      res.status(500).send("Failed to convert file");
+      res.status(500).send(error.message || "Failed to convert file");
     }
   });
 

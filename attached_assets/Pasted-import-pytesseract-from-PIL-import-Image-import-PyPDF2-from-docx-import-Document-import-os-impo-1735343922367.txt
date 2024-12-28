@@ -1,0 +1,80 @@
+import pytesseract
+from PIL import Image
+import PyPDF2
+from docx import Document
+import os
+import openai
+
+# Set up OpenAI API Key
+openai.api_key = "your_openai_api_key"
+
+def extract_text_from_image(image_path):
+    try:
+        img = Image.open(image_path)
+        text = pytesseract.image_to_string(img)
+        return text
+    except Exception as e:
+        return f"Error extracting text from image: {e}"
+
+def extract_text_from_pdf(pdf_path):
+    try:
+        text = ""
+        with open(pdf_path, 'rb') as file:
+            reader = PyPDF2.PdfReader(file)
+            for page in reader.pages:
+                text += page.extract_text()
+        return text
+    except Exception as e:
+        return f"Error extracting text from PDF: {e}"
+
+def extract_text_from_docx(docx_path):
+    try:
+        text = ""
+        document = Document(docx_path)
+        for paragraph in document.paragraphs:
+            text += paragraph.text + '\n'
+        return text
+    except Exception as e:
+        return f"Error extracting text from DOCX: {e}"
+
+def extract_text(file_path):
+    if not os.path.exists(file_path):
+        return "File not found. Please provide a valid file path."
+
+    _, file_extension = os.path.splitext(file_path)
+
+    if file_extension.lower() in ['.jpg', '.jpeg', '.png', '.bmp', '.tiff']:
+        return extract_text_from_image(file_path)
+    elif file_extension.lower() == '.pdf':
+        return extract_text_from_pdf(file_path)
+    elif file_extension.lower() == '.docx':
+        return extract_text_from_docx(file_path)
+    else:
+        return "Unsupported file format. Supported formats are: images (JPG, PNG, BMP, TIFF), PDF, DOCX."
+
+def summarize_text(text):
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that summarizes text."},
+                {"role": "user", "content": text}
+            ]
+        )
+        summary = response['choices'][0]['message']['content']
+        return summary
+    except Exception as e:
+        return f"Error generating summary: {e}"
+
+if __name__ == "__main__":
+    print("Text Extraction and Summarization Application")
+    file_path = input("Enter the path to the file: ")
+    extracted_text = extract_text(file_path)
+    print("\nExtracted Text:\n")
+    print(extracted_text)
+
+    summarize = input("\nDo you want a summary of the extracted text? (yes/no): ").strip().lower()
+    if summarize == 'yes':
+        summary = summarize_text(extracted_text)
+        print("\nSummary:\n")
+        print(summary)
