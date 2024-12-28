@@ -6,133 +6,175 @@ from docx import Document
 import PyPDF2
 import mammoth
 import traceback
+from typing import Dict, Any, Optional, Union
 
-def process_doc_file(file_path: str) -> dict:
-    """Process DOC file with enhanced error handling and logging."""
-    try:
-        print(f"Debug: Starting DOC file processing: {file_path}", file=sys.stderr)
+def debug_log(message: str) -> None:
+    """Print debug messages to stderr"""
+    print(f"Debug: {message}", file=sys.stderr)
 
-        if not os.path.exists(file_path):
-            print(f"Debug: File not found: {file_path}", file=sys.stderr)
-            return {"error": "File not found"}
+class DocumentProcessor:
+    """Handles document processing with robust error handling and logging"""
 
-        with open(file_path, 'rb') as doc_file:
-            # Test markdown conversion first
-            print("Debug: Attempting markdown conversion...", file=sys.stderr)
-            try:
-                result = mammoth.convert_to_markdown(doc_file)
-                text = result.value.strip()
+    @staticmethod
+    def process_doc(file_path: str) -> Dict[str, Any]:
+        """Process DOC files with multiple fallback methods"""
+        try:
+            debug_log(f"Processing DOC file: {file_path}")
 
-                if text:
-                    print(f"Debug: Markdown conversion successful. Text length: {len(text)}", file=sys.stderr)
-                    return {
-                        "type": "doc",
-                        "content": {
-                            "text": text
-                        }
-                    }
-            except Exception as e:
-                print(f"Debug: Markdown conversion failed: {str(e)}", file=sys.stderr)
+            if not os.path.exists(file_path):
+                return {"error": "File not found"}
 
-            # Try raw text extraction as fallback
-            print("Debug: Attempting raw text extraction...", file=sys.stderr)
-            doc_file.seek(0)
-            try:
-                result = mammoth.extract_raw_text(doc_file)
-                text = result.value.strip()
+            with open(file_path, 'rb') as doc_file:
+                # Try different methods in sequence
+                methods = [
+                    ('markdown', lambda f: mammoth.convert_to_markdown(f)),
+                    ('raw_text', lambda f: mammoth.extract_raw_text(f)),
+                    ('html', lambda f: mammoth.convert_to_html(f))
+                ]
 
-                if text:
-                    print(f"Debug: Raw text extraction successful. Text length: {len(text)}", file=sys.stderr)
-                    return {
-                        "type": "doc",
-                        "content": {
-                            "text": text
-                        }
-                    }
-            except Exception as e:
-                print(f"Debug: Raw text extraction failed: {str(e)}", file=sys.stderr)
+                for method_name, converter in methods:
+                    try:
+                        debug_log(f"Attempting {method_name} conversion...")
+                        doc_file.seek(0)
+                        result = converter(doc_file)
+                        text = result.value.strip()
 
-        error_msg = "Failed to extract text from DOC file"
-        print(f"Debug: {error_msg}", file=sys.stderr)
-        return {"error": error_msg}
+                        if text:
+                            debug_log(f"Successfully extracted text using {method_name}. Length: {len(text)}")
+                            return {
+                                "type": "doc",
+                                "content": {
+                                    "text": text,
+                                    "method": method_name
+                                }
+                            }
+                        debug_log(f"{method_name} conversion produced empty result")
+                    except Exception as e:
+                        debug_log(f"{method_name} conversion failed: {str(e)}")
+                        continue
 
-    except Exception as e:
-        error_msg = f"DOC processing failed: {str(e)}"
-        print(f"Debug: Error: {error_msg}", file=sys.stderr)
-        print(f"Debug: Traceback: {traceback.format_exc()}", file=sys.stderr)
-        return {"error": error_msg}
+            return {"error": "Failed to extract text using any available method"}
 
-def process_document(file_path: str) -> dict:
-    """Process document and extract text."""
-    try:
-        if not os.path.exists(file_path):
-            return {"error": "File not found"}
+        except Exception as e:
+            debug_log(f"Fatal error in DOC processing: {str(e)}")
+            debug_log(traceback.format_exc())
+            return {"error": f"DOC processing failed: {str(e)}"}
 
-        _, file_extension = os.path.splitext(file_path)
-        ext = file_extension.lower()
+    @staticmethod
+    def process_docx(file_path: str) -> Dict[str, Any]:
+        """Process DOCX files"""
+        try:
+            debug_log(f"Processing DOCX file: {file_path}")
+            doc = Document(file_path)
+            text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
 
-        print(f"Debug: Processing file: {file_path} with extension: {ext}", file=sys.stderr)
+            if not text.strip():
+                return {"error": "No text content found in DOCX"}
 
-        result = None
-        if ext == '.doc':
-            result = process_doc_file(file_path)
-        elif ext == '.docx':
-            try:
-                doc = Document(file_path)
-                result = {
-                    "type": "docx",
-                    "content": {
-                        "text": "\n".join(paragraph.text for paragraph in doc.paragraphs)
-                    }
+            return {
+                "type": "docx",
+                "content": {"text": text}
+            }
+        except Exception as e:
+            debug_log(f"DOCX processing failed: {str(e)}")
+            return {"error": f"DOCX processing failed: {str(e)}"}
+
+    @staticmethod
+    def process_pdf(file_path: str) -> Dict[str, Any]:
+        """Process PDF files"""
+        try:
+            debug_log(f"Processing PDF file: {file_path}")
+            with open(file_path, 'rb') as file:
+                reader = PyPDF2.PdfReader(file)
+                pages = []
+                for page in reader.pages:
+                    text = page.extract_text()
+                    if text.strip():
+                        pages.append(text)
+
+                if not pages:
+                    return {"error": "No text content found in PDF"}
+
+                return {
+                    "type": "pdf",
+                    "content": {"pages": pages}
                 }
-            except Exception as e:
-                print(f"Debug: DOCX processing failed: {str(e)}", file=sys.stderr)
-                result = {"error": f"DOCX processing failed: {str(e)}"}
+        except Exception as e:
+            debug_log(f"PDF processing failed: {str(e)}")
+            return {"error": f"PDF processing failed: {str(e)}"}
+
+    @staticmethod
+    def process_text(file_path: str) -> Dict[str, Any]:
+        """Process text files"""
+        try:
+            debug_log(f"Processing text file: {file_path}")
+            with open(file_path, 'r', encoding='utf-8') as file:
+                text = file.read()
+                if not text.strip():
+                    return {"error": "Empty text file"}
+
+                return {
+                    "type": "text",
+                    "content": {"text": text}
+                }
+        except UnicodeDecodeError:
+            # Try different encodings
+            for encoding in ['latin-1', 'cp1252']:
+                try:
+                    with open(file_path, 'r', encoding=encoding) as file:
+                        text = file.read()
+                        if text.strip():
+                            return {
+                                "type": "text",
+                                "content": {"text": text}
+                            }
+                except:
+                    continue
+            return {"error": "Failed to decode text file with supported encodings"}
+        except Exception as e:
+            debug_log(f"Text file processing failed: {str(e)}")
+            return {"error": f"Text file processing failed: {str(e)}"}
+
+def process_document(file_path: str) -> Dict[str, Any]:
+    """Main document processing function"""
+    try:
+        if not os.path.exists(file_path):
+            return {"error": "File not found"}
+
+        _, ext = os.path.splitext(file_path)
+        ext = ext.lower()
+
+        debug_log(f"Processing file: {file_path} with extension: {ext}")
+
+        processor = DocumentProcessor()
+
+        # Process based on file extension
+        if ext == '.doc':
+            result = processor.process_doc(file_path)
+        elif ext == '.docx':
+            result = processor.process_docx(file_path)
         elif ext == '.pdf':
-            try:
-                with open(file_path, 'rb') as file:
-                    reader = PyPDF2.PdfReader(file)
-                    pages = [page.extract_text() for page in reader.pages]
-                    result = {
-                        "type": "pdf",
-                        "content": {
-                            "pages": pages
-                        }
-                    }
-            except Exception as e:
-                print(f"Debug: PDF processing failed: {str(e)}", file=sys.stderr)
-                result = {"error": f"PDF processing failed: {str(e)}"}
+            result = processor.process_pdf(file_path)
         elif ext in ['.txt', '.md']:
-            try:
-                with open(file_path, 'r', encoding='utf-8') as file:
-                    result = {
-                        "type": "text",
-                        "content": {
-                            "text": file.read()
-                        }
-                    }
-            except Exception as e:
-                print(f"Debug: Text file processing failed: {str(e)}", file=sys.stderr)
-                result = {"error": f"Text file processing failed: {str(e)}"}
+            result = processor.process_text(file_path)
         else:
             result = {"error": f"Unsupported file format: {ext}"}
 
+        # Ensure result is properly formatted
         json_result = json.dumps(result)
         print(json_result)  # Only JSON output goes to stdout
         return result
 
     except Exception as e:
         error_msg = f"Processing failed: {str(e)}"
-        print(f"Debug: Fatal error: {error_msg}", file=sys.stderr)
-        print(f"Debug: Traceback: {traceback.format_exc()}", file=sys.stderr)
+        debug_log(f"Fatal error: {error_msg}")
+        debug_log(traceback.format_exc())
         json_error = json.dumps({"error": error_msg})
         print(json_error)
         return {"error": error_msg}
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
-        file_path = sys.argv[1]
-        process_document(file_path)
+        process_document(sys.argv[1])
     else:
-        error = json.dumps({"error": "No file path provided"})
-        print(error)
+        print(json.dumps({"error": "No file path provided"}))

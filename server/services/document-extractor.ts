@@ -6,60 +6,20 @@ import { dirname } from 'path';
 import Logger from "../utils/logger";
 import { sanitizeContent, validateContentSafety } from "./sanitization";
 
-// Get the directory name in ESM
 const __filename = fileURLToPath(import.meta.url);
 const currentDir = dirname(__filename);
 const rootDir = dirname(dirname(currentDir));
 
-interface DocumentMetadata {
-  author?: string;
-  created?: string;
-  modified?: string;
-  title?: string;
-  subject?: string;
-  keywords?: string;
-  category?: string;
-  comments?: string;
-}
-
-interface StyleInfo {
-  bold: boolean;
-  italic: boolean;
-  underline: boolean;
-}
-
-interface ParagraphContent {
-  type: 'paragraph';
-  text: string;
-  style: StyleInfo;
-}
-
-interface DocumentSection {
-  heading: string;
-  content: ParagraphContent[];
-  level: number;
-}
-
-interface TableData {
-  data: string[][];
-  row_count: number;
-  col_count: number;
-}
-
-interface DocumentContent {
-  metadata: DocumentMetadata;
-  sections: DocumentSection[];
-  tables: TableData[];
-  headers: string[][];
-  footers: string[][];
-}
-
 interface ProcessedDocument {
-  type: 'docx' | 'doc' | 'pdf' | 'text';
-  content: DocumentContent | { text: string; messages?: string[] };
+  type: 'doc' | 'docx' | 'pdf' | 'text';
+  content: {
+    text?: string;
+    pages?: string[];
+    method?: string;
+  };
 }
 
-function runPythonProcessor(filePath: string): Promise<ProcessedDocument> {
+async function runPythonProcessor(filePath: string): Promise<ProcessedDocument> {
   return new Promise((resolve, reject) => {
     const pythonScript = path.join(rootDir, 'server', 'services', 'python', 'processor.py');
 
@@ -75,21 +35,21 @@ function runPythonProcessor(filePath: string): Promise<ProcessedDocument> {
 
     pythonProcess.stdout.on('data', (data) => {
       const chunk = data.toString();
-      Logger.info("[DocumentProcessor] Python stdout:", { output: chunk });
+      Logger.debug("[DocumentProcessor] Python stdout:", { output: chunk });
       output += chunk;
     });
 
     pythonProcess.stderr.on('data', (data) => {
       const chunk = data.toString();
-      Logger.error("[DocumentProcessor] Python stderr:", { error: chunk });
+      Logger.debug("[DocumentProcessor] Python stderr:", { error: chunk });
       errorOutput += chunk;
     });
 
     pythonProcess.on('close', (code) => {
       Logger.info("[DocumentProcessor] Python process completed", { 
         code,
-        output: output.trim(),
-        error: errorOutput.trim()
+        hasOutput: Boolean(output.trim()),
+        hasError: Boolean(errorOutput.trim())
       });
 
       if (code !== 0) {
@@ -102,21 +62,23 @@ function runPythonProcessor(filePath: string): Promise<ProcessedDocument> {
       }
 
       try {
-        // Try to parse only the last line as JSON (in case there's debug output before)
+        // Parse only the last line as JSON (in case there's debug output)
         const lines = output.trim().split('\n');
         const lastLine = lines[lines.length - 1];
         const result = JSON.parse(lastLine);
 
         if (result.error) {
           Logger.error("[DocumentProcessor] Processing error", {
-            error: result.error
+            error: result.error,
+            debug: errorOutput
           });
           reject(new Error(result.error));
           return;
         }
 
         Logger.info("[DocumentProcessor] Processing completed successfully", {
-          documentType: result.type
+          documentType: result.type,
+          contentLength: result.content?.text?.length ?? result.content?.pages?.join('\n').length ?? 0
         });
         resolve(result as ProcessedDocument);
       } catch (error) {
@@ -129,7 +91,6 @@ function runPythonProcessor(filePath: string): Promise<ProcessedDocument> {
       }
     });
 
-    // Handle process errors
     pythonProcess.on('error', (error) => {
       Logger.error("[DocumentProcessor] Process error", {
         error: error.message,
@@ -153,19 +114,16 @@ export async function extractTextFromDocument(filePath: string): Promise<string>
     const processedDoc = await runPythonProcessor(filePath);
     let extractedText = '';
 
-    // Extract text based on document type
-    if (processedDoc.type === 'docx' || processedDoc.type === 'doc') {
-      extractedText = (processedDoc.content as { text: string }).text;
+    // Extract text based on document type and structure
+    if (processedDoc.type === 'doc' || processedDoc.type === 'docx' || processedDoc.type === 'text') {
+      extractedText = processedDoc.content.text || '';
     } else if (processedDoc.type === 'pdf') {
-      const content = processedDoc.content as { pages: string[] };
-      extractedText = content.pages.join('\n\n');
-    } else if (processedDoc.type === 'text') {
-      extractedText = (processedDoc.content as { text: string }).text;
+      extractedText = (processedDoc.content.pages || []).join('\n\n');
     }
 
-    if (!extractedText || extractedText.trim().length < 10) {
-      Logger.warn("[TextExtraction] Extracted text is too short or empty", { 
-        textLength: extractedText ? extractedText.length : 0 
+    if (!extractedText || extractedText.trim().length === 0) {
+      Logger.warn("[TextExtraction] Extracted text is empty", {
+        documentType: processedDoc.type
       });
       throw new Error("No valid text content extracted from document");
     }
