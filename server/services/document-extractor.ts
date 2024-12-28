@@ -20,19 +20,53 @@ export async function extractTextFromDocument(filePath: string): Promise<string>
       case '.doc':
         try {
           Logger.info("[TextExtraction] Processing Word document", { extension });
-          const result = await mammoth.extractRawText({ path: filePath });
+          // Read the file as a buffer for binary files
+          const buffer = await fs.promises.readFile(filePath);
+
+          // Use mammoth for text extraction
+          const result = await mammoth.extractRawText({ buffer });
           text = result.value;
+
+          // Validate extracted text
+          if (!text || text.trim().length === 0) {
+            throw new Error("No text content extracted");
+          }
+
+          // Check if the text contains binary data markers
+          if (text.includes('�') || /[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(text)) {
+            throw new Error("Invalid text content extracted");
+          }
+
           Logger.info("[TextExtraction] Word document processed", { 
             textLength: text.length,
             messages: result.messages 
           });
-        } catch (error) {
-          Logger.error("[TextExtraction] Error processing Word document", { error });
-          // Fallback for older .doc files
-          text = await fs.promises.readFile(filePath, 'utf8');
-          Logger.info("[TextExtraction] Fallback text extraction completed", { 
-            textLength: text.length 
-          });
+        } catch (docError) {
+          Logger.error("[TextExtraction] Error with primary extraction method", { docError });
+
+          // Try alternative mammoth options for older doc files
+          try {
+            const buffer = await fs.promises.readFile(filePath);
+            const result = await mammoth.extractRawText({
+              buffer,
+              options: {
+                preserveEmptyParagraphs: true,
+                includeDefaultStyleMap: true
+              }
+            });
+            text = result.value;
+
+            if (!text || text.trim().length === 0) {
+              throw new Error("No text content extracted with fallback method");
+            }
+
+            Logger.info("[TextExtraction] Fallback extraction successful", {
+              textLength: text.length
+            });
+          } catch (fallbackError) {
+            Logger.error("[TextExtraction] Fallback extraction failed", { fallbackError });
+            throw new Error("Failed to extract text from document file");
+          }
         }
         break;
 
@@ -42,16 +76,29 @@ export async function extractTextFromDocument(filePath: string): Promise<string>
           const pdfBytes = await fs.promises.readFile(filePath);
           const pdfDoc = await PDFDocument.load(pdfBytes);
           const pages = pdfDoc.getPages();
+          let pdfText = '';
 
           for (let i = 0; i < pages.length; i++) {
             const page = pages[i];
-            const content = await page.getTextContent(); //Corrected PDF text extraction
-            const pageText = content.items.map(item => item.str).join(' ');
-            text += pageText + '\n';
+            const content = await page.getTextContent();
+            const pageText = content.items
+              .filter(item => typeof item.str === 'string' && item.str.trim().length > 0)
+              .map(item => item.str.trim())
+              .join(' ');
+
+            if (pageText.length > 0) {
+              pdfText += pageText + '\n\n';
+            }
+
             Logger.info("[TextExtraction] PDF page processed", { 
               pageNumber: i + 1,
               pageTextLength: pageText.length 
             });
+          }
+
+          text = pdfText.trim();
+          if (!text) {
+            throw new Error("No text content extracted from PDF");
           }
         } catch (error) {
           Logger.error("[TextExtraction] Error processing PDF", { error });
@@ -64,6 +111,12 @@ export async function extractTextFromDocument(filePath: string): Promise<string>
         try {
           Logger.info("[TextExtraction] Processing text file");
           text = await fs.promises.readFile(filePath, 'utf8');
+
+          // Validate text content
+          if (!text || text.trim().length === 0) {
+            throw new Error("Empty text file");
+          }
+
           Logger.info("[TextExtraction] Text file processed", { 
             textLength: text.length 
           });
@@ -77,12 +130,21 @@ export async function extractTextFromDocument(filePath: string): Promise<string>
         throw new Error(`Unsupported file type: ${extension}`);
     }
 
-    if (!text || text.length < 10) {
-      Logger.warn("[TextExtraction] Extracted text is too short", { 
-        textLength: text.length 
+    // Final validation of extracted text
+    if (!text || text.trim().length < 10) {
+      Logger.warn("[TextExtraction] Extracted text is too short or empty", { 
+        textLength: text ? text.length : 0 
       });
       throw new Error("No valid text content extracted from document");
     }
+
+    // Clean up the extracted text
+    text = text
+      .replace(/[\x00-\x09\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '') // Remove control characters
+      .replace(/\u0000/g, '') // Remove null characters
+      .replace(/[^\S\r\n]+/g, ' ') // Normalize whitespace
+      .replace(/\n{3,}/g, '\n\n') // Normalize multiple newlines
+      .trim();
 
     Logger.info("[TextExtraction] Document processing completed", {
       fileType: extension,
@@ -92,7 +154,7 @@ export async function extractTextFromDocument(filePath: string): Promise<string>
     return text;
   } catch (error) {
     Logger.error("[TextExtraction] Fatal error in text extraction", { 
-      error,
+      error: error.message,
       filePath 
     });
     throw error;
@@ -133,7 +195,7 @@ export async function validateDocument(filePath: string): Promise<boolean> {
     return true;
   } catch (error) {
     Logger.error("[Validation] Document validation failed", { 
-      error,
+      error: error.message,
       filePath 
     });
     throw error;
