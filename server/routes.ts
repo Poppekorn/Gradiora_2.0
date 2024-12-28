@@ -10,6 +10,7 @@ import path from "path";
 import fs from "fs";
 import { summarizeContent, getQuotaInfo, getStoredSummary } from "./services/openai";
 import { extractTextFromDocument, validateDocument } from "./services/document-extractor";
+import { generateThumbnail } from "./services/thumbnails";
 
 // Ensure uploads directory exists
 const uploadDir = path.join(process.cwd(), 'uploads');
@@ -972,7 +973,7 @@ export function registerRoutes(app: Express): Server {
         .returning();
 
       if (!deletedFileTag) {
-        Logger.warn("Tag association not found", {
+        Logger.warn("Tag association not found",{
           fileId: req.params.fileId,
           tagId: req.params.tagId,
           boardId: req.params.boardId,
@@ -1232,6 +1233,38 @@ export function registerRoutes(app: Express): Server {
         tileId: req.params.tileId,
       });
       res.status(500).send("Failed to generate study unit quiz");
+    }
+  });
+
+  app.get("/api/files/:fileId/thumbnail", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.status(401).send("Not authenticated");
+    }
+
+    try {
+      const [file] = await db
+        .select()
+        .from(files)
+        .where(eq(files.id, parseInt(req.params.fileId)))
+        .limit(1);
+
+      if (!file) {
+        return res.status(404).send("File not found");
+      }
+
+      const filePath = path.join(uploadDir, file.filename);
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).send("File not found on disk");
+      }
+
+      // Generate thumbnail if it doesn't exist
+      const thumbnailPath = await generateThumbnail(filePath);
+
+      // Send the thumbnail file
+      res.sendFile(thumbnailPath);
+    } catch (error) {
+      Logger.error("Error generating thumbnail:", error);
+      res.status(500).send("Failed to generate thumbnail");
     }
   });
 
