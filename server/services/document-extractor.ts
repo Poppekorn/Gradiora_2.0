@@ -3,6 +3,7 @@ import mammoth from "mammoth";
 import fs from "fs";
 import path from "path";
 import Logger from "../utils/logger";
+import { sanitizeContent, validateContentSafety } from "./sanitization";
 
 export async function extractTextFromDocument(filePath: string): Promise<string> {
   try {
@@ -32,9 +33,9 @@ export async function extractTextFromDocument(filePath: string): Promise<string>
             throw new Error("No text content extracted");
           }
 
-          // Check if the text contains binary data markers
-          if (text.includes('�') || /[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(text)) {
-            throw new Error("Invalid text content extracted");
+          // Initial safety check
+          if (!validateContentSafety(text)) {
+            throw new Error("Content failed safety validation");
           }
 
           Logger.info("[TextExtraction] Word document processed", { 
@@ -58,6 +59,10 @@ export async function extractTextFromDocument(filePath: string): Promise<string>
 
             if (!text || text.trim().length === 0) {
               throw new Error("No text content extracted with fallback method");
+            }
+
+            if (!validateContentSafety(text)) {
+              throw new Error("Fallback content failed safety validation");
             }
 
             Logger.info("[TextExtraction] Fallback extraction successful", {
@@ -86,7 +91,7 @@ export async function extractTextFromDocument(filePath: string): Promise<string>
               .map(item => item.str.trim())
               .join(' ');
 
-            if (pageText.length > 0) {
+            if (pageText.length > 0 && validateContentSafety(pageText)) {
               pdfText += pageText + '\n\n';
             }
 
@@ -117,6 +122,10 @@ export async function extractTextFromDocument(filePath: string): Promise<string>
             throw new Error("Empty text file");
           }
 
+          if (!validateContentSafety(text)) {
+            throw new Error("Text content failed safety validation");
+          }
+
           Logger.info("[TextExtraction] Text file processed", { 
             textLength: text.length 
           });
@@ -130,7 +139,7 @@ export async function extractTextFromDocument(filePath: string): Promise<string>
         throw new Error(`Unsupported file type: ${extension}`);
     }
 
-    // Final validation of extracted text
+    // Final validation and sanitization
     if (!text || text.trim().length < 10) {
       Logger.warn("[TextExtraction] Extracted text is too short or empty", { 
         textLength: text ? text.length : 0 
@@ -138,13 +147,12 @@ export async function extractTextFromDocument(filePath: string): Promise<string>
       throw new Error("No valid text content extracted from document");
     }
 
-    // Clean up the extracted text
-    text = text
-      .replace(/[\x00-\x09\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '') // Remove control characters
-      .replace(/\u0000/g, '') // Remove null characters
-      .replace(/[^\S\r\n]+/g, ' ') // Normalize whitespace
-      .replace(/\n{3,}/g, '\n\n') // Normalize multiple newlines
-      .trim();
+    // Sanitize the extracted text
+    text = sanitizeContent(text, {
+      normalizeWhitespace: true,
+      removeControlChars: true,
+      maxLength: 1000000 // 1MB text limit
+    });
 
     Logger.info("[TextExtraction] Document processing completed", {
       fileType: extension,
@@ -154,7 +162,7 @@ export async function extractTextFromDocument(filePath: string): Promise<string>
     return text;
   } catch (error) {
     Logger.error("[TextExtraction] Fatal error in text extraction", { 
-      error: error.message,
+      error: error instanceof Error ? error.message : String(error),
       filePath 
     });
     throw error;
@@ -195,7 +203,7 @@ export async function validateDocument(filePath: string): Promise<boolean> {
     return true;
   } catch (error) {
     Logger.error("[Validation] Document validation failed", { 
-      error: error.message,
+      error: error instanceof Error ? error.message : String(error),
       filePath 
     });
     throw error;
