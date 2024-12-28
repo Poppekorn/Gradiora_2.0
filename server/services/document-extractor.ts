@@ -11,11 +11,13 @@ const currentDir = dirname(__filename);
 const rootDir = dirname(dirname(currentDir));
 
 interface ProcessedDocument {
-  type: 'doc' | 'docx' | 'pdf' | 'text';
+  type: 'doc' | 'docx' | 'pdf' | 'text' | 'image';
   content: {
     text?: string;
     pages?: string[];
     method?: string;
+    extracted_text?: string;
+    ocr_confidence?: number;
   };
 }
 
@@ -62,7 +64,6 @@ async function runPythonProcessor(filePath: string): Promise<ProcessedDocument> 
       }
 
       try {
-        // Parse only the last line as JSON (in case there's debug output)
         const lines = output.trim().split('\n');
         const lastLine = lines[lines.length - 1];
         const result = JSON.parse(lastLine);
@@ -119,6 +120,8 @@ export async function extractTextFromDocument(filePath: string): Promise<string>
       extractedText = processedDoc.content.text || '';
     } else if (processedDoc.type === 'pdf') {
       extractedText = (processedDoc.content.pages || []).join('\n\n');
+    } else if (processedDoc.type === 'image') {
+      extractedText = processedDoc.content.extracted_text || '';
     }
 
     if (!extractedText || extractedText.trim().length === 0) {
@@ -170,7 +173,12 @@ export async function validateDocument(filePath: string): Promise<boolean> {
     }
 
     const extension = path.extname(filePath).toLowerCase();
-    const supportedTypes = ['.doc', '.docx', '.pdf', '.txt', '.md'];
+    const supportedTypes = [
+      // Document types
+      '.doc', '.docx', '.pdf', '.txt', '.md',
+      // Image types
+      '.jpg', '.jpeg', '.png', '.webp'
+    ];
 
     if (!supportedTypes.includes(extension)) {
       Logger.warn("[Validation] Unsupported file type", { 
