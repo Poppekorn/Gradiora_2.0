@@ -6,6 +6,7 @@ from docx import Document
 import PyPDF2
 import mammoth
 import traceback
+import subprocess
 from typing import Dict, Any, Optional, Union
 
 def debug_log(message: str) -> None:
@@ -16,6 +17,27 @@ class DocumentProcessor:
     """Handles document processing with robust error handling and logging"""
 
     @staticmethod
+    def process_doc_antiword(file_path: str) -> Optional[str]:
+        """Process DOC file using antiword as fallback"""
+        try:
+            debug_log("Attempting antiword conversion...")
+            result = subprocess.run(
+                ['antiword', file_path],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            if result.stdout.strip():
+                debug_log(f"Antiword extraction successful. Length: {len(result.stdout)}")
+                return result.stdout
+        except subprocess.CalledProcessError as e:
+            debug_log(f"Antiword conversion failed: {str(e)}")
+            debug_log(f"stderr: {e.stderr}")
+        except Exception as e:
+            debug_log(f"Antiword error: {str(e)}")
+        return None
+
+    @staticmethod
     def process_doc(file_path: str) -> Dict[str, Any]:
         """Process DOC files with multiple fallback methods"""
         try:
@@ -24,12 +46,22 @@ class DocumentProcessor:
             if not os.path.exists(file_path):
                 return {"error": "File not found"}
 
+            # Try antiword first
+            text = DocumentProcessor.process_doc_antiword(file_path)
+            if text:
+                return {
+                    "type": "doc",
+                    "content": {
+                        "text": text,
+                        "method": "antiword"
+                    }
+                }
+
+            # If antiword fails, try mammoth
             with open(file_path, 'rb') as doc_file:
-                # Try different methods in sequence
                 methods = [
                     ('markdown', lambda f: mammoth.convert_to_markdown(f)),
-                    ('raw_text', lambda f: mammoth.extract_raw_text(f)),
-                    ('html', lambda f: mammoth.convert_to_html(f))
+                    ('raw_text', lambda f: mammoth.extract_raw_text(f))
                 ]
 
                 for method_name, converter in methods:
