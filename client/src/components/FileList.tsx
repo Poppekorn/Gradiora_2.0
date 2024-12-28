@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/select";
 import { Image } from "@/components/ui/image";
 import { Skeleton } from "@/components/ui/skeleton";
+import { DocumentLayout } from "@/components/ui/document-layout";
 
 interface FileListProps {
   boardId: number;
@@ -208,6 +209,36 @@ export default function FileList({ boardId }: FileListProps) {
     );
   };
 
+  const renderPreview = (preview: any, file: FileWithTags) => {
+    const isImage = isImageFile(file.mimeType);
+
+    return (
+      <div className="space-y-4">
+        {isImage ? (
+          renderImagePreview(preview, file)
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-4">
+              <h4 className="font-semibold">Content</h4>
+              <ScrollArea className="h-[600px] rounded-md border p-4">
+                <pre className="whitespace-pre-wrap text-sm">
+                  {preview.content?.text || preview.preview}
+                </pre>
+              </ScrollArea>
+            </div>
+            {preview.content?.layout && (
+              <div className="space-y-4">
+                <h4 className="font-semibold">Document Structure</h4>
+                <DocumentLayout sections={preview.content.layout} />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+
   if (isLoading) {
     return <div>Loading files...</div>;
   }
@@ -361,17 +392,7 @@ export default function FileList({ boardId }: FileListProps) {
                   )}
 
                   {preview && isPreviewVisible && (
-                    <div className="border rounded-lg p-4">
-                      {preview.type === 'image' ? (
-                        renderImagePreview(preview, file)
-                      ) : (
-                        <div className="max-h-48 overflow-auto">
-                          <pre className="whitespace-pre-wrap text-sm">
-                            {preview.content?.text || preview.preview}
-                          </pre>
-                        </div>
-                      )}
-                    </div>
+                    renderPreview(preview, file)
                   )}
 
                   {isExpanded && (

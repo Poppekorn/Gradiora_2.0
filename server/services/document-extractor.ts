@@ -6,10 +6,25 @@ import { dirname } from 'path';
 import Logger from "../utils/logger";
 import { sanitizeContent, validateContentSafety } from "./sanitization";
 import { extractTextFromImage, analyzeImageContent } from "./vision";
+import OpenAI from "openai";
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const __filename = fileURLToPath(import.meta.url);
 const currentDir = dirname(__filename);
 const rootDir = dirname(dirname(currentDir));
+
+interface DocumentSection {
+  type: 'heading1' | 'heading2' | 'paragraph' | 'image' | 'list';
+  content: string;
+  confidence?: number;
+  boundingBox?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+}
 
 interface ProcessedDocument {
   type: 'doc' | 'docx' | 'pdf' | 'text' | 'image';
@@ -21,6 +36,7 @@ interface ProcessedDocument {
     ocr_confidence?: number;
     summary?: string;
     explanation?: string;
+    layout?: DocumentSection[]; 
   };
 }
 
@@ -139,6 +155,36 @@ async function runPythonProcessor(filePath: string): Promise<ProcessedDocument> 
   });
 }
 
+async function analyzeDocumentLayout(text: string, isImage: boolean = false): Promise<DocumentSection[]> {
+  try {
+    Logger.info("[LayoutAnalysis] Starting document layout analysis");
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o", 
+      messages: [
+        {
+          role: "user",
+          content: `Analyze this document content and identify its structure. Break it down into sections (heading1, heading2, paragraph, list) with their content. Return in JSON format as an array of sections. Each section should have 'type' and 'content' fields.\n\n${text}`
+        }
+      ],
+      response_format: { type: "json_object" }
+    });
+
+    const result = JSON.parse(response.choices[0].message.content);
+
+    Logger.info("[LayoutAnalysis] Layout analysis completed", {
+      sectionCount: result.sections?.length || 0
+    });
+
+    return result.sections || [];
+  } catch (error) {
+    Logger.error("[LayoutAnalysis] Layout analysis failed", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return [];
+  }
+}
+
 export async function extractTextFromDocument(filePath: string): Promise<string> {
   try {
     Logger.info("[TextExtraction] Starting document processing", { filePath });
@@ -180,18 +226,22 @@ export async function extractTextFromDocument(filePath: string): Promise<string>
       throw new Error("No valid text content extracted from document");
     }
 
-    // Validate content safety, passing isImage flag for image content
     if (!validateContentSafety(extractedText, isImage)) {
       throw new Error("Content failed safety validation");
     }
 
-    // Sanitize the extracted text with appropriate options for image content
     const sanitizedText = sanitizeContent(extractedText, {
       normalizeWhitespace: true,
       removeControlChars: true,
-      maxLength: 1000000, // 1MB text limit
+      maxLength: 1000000, 
       isImageContent: isImage
     });
+
+    const layout = await analyzeDocumentLayout(sanitizedText, isImage);
+
+    if (processedDoc && layout.length > 0) {
+      processedDoc.content.layout = layout;
+    }
 
     Logger.info("[TextExtraction] Document processing completed", {
       textLength: sanitizedText.length,
@@ -225,9 +275,7 @@ export async function validateDocument(filePath: string): Promise<boolean> {
 
     const extension = path.extname(filePath).toLowerCase();
     const supportedTypes = [
-      // Document types
       '.doc', '.docx', '.pdf', '.txt', '.md',
-      // Image types
       '.jpg', '.jpeg', '.png', '.webp'
     ];
 
