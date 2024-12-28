@@ -72,29 +72,44 @@ export default function FileList({ boardId }: FileListProps) {
 
   const generateSummary = useMutation({
     mutationFn: async (fileId: number) => {
-      setConversionProgress(prev => ({ ...prev, [fileId]: 25 }));
+      try {
+        setConversionProgress(prev => ({ ...prev, [fileId]: 25 }));
 
-      const response = await fetch(`/api/boards/${boardId}/files/${fileId}/convert`, {
-        method: 'POST',
-        credentials: 'include',
-      });
+        // For images, we don't need separate conversion
+        const file = files.find(f => f.id === fileId);
+        if (!file) throw new Error("File not found");
+        if (!isImageFile(file.mimeType)) {
+          const response = await fetch(`/api/boards/${boardId}/files/${fileId}/convert`, {
+            method: 'POST',
+            credentials: 'include',
+          });
 
-      if (!response.ok) throw new Error(await response.text());
-      setConversionProgress(prev => ({ ...prev, [fileId]: 50 }));
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(errorText);
+          }
+        }
 
-      const summaryResponse = await fetch(`/api/boards/${boardId}/files/${fileId}/summarize`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ educationLevel }),
-        credentials: 'include',
-      });
+        setConversionProgress(prev => ({ ...prev, [fileId]: 50 }));
 
-      setConversionProgress(prev => ({ ...prev, [fileId]: 75 }));
+        const summaryResponse = await fetch(`/api/boards/${boardId}/files/${fileId}/summarize`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ educationLevel }),
+          credentials: 'include',
+        });
 
-      if (!summaryResponse.ok) throw new Error(await summaryResponse.text());
-      setConversionProgress(prev => ({ ...prev, [fileId]: 100 }));
+        if (!summaryResponse.ok) {
+          const errorText = await summaryResponse.text();
+          throw new Error(errorText);
+        }
 
-      return summaryResponse.json();
+        setConversionProgress(prev => ({ ...prev, [fileId]: 100 }));
+        return summaryResponse.json();
+      } catch (error) {
+        handleError(error as Error);
+        throw error;
+      }
     },
   });
 
@@ -197,12 +212,22 @@ export default function FileList({ boardId }: FileListProps) {
       setConversionLoading(prev => ({ ...prev, [fileId]: true }));
       setConversionProgress(prev => ({ ...prev, [fileId]: 0 }));
 
-      const response = await fetch(`/api/boards/${boardId}/files/${fileId}/convert`, {
-        method: 'POST',
-        credentials: 'include',
-      });
+      const file = files.find(f => f.id === fileId);
+      if (!file) throw new Error("File not found");
 
-      if (!response.ok) throw new Error(await response.text());
+      // For images, skip the conversion step
+      if (!isImageFile(file.mimeType)) {
+        const response = await fetch(`/api/boards/${boardId}/files/${fileId}/convert`, {
+          method: 'POST',
+          credentials: 'include',
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(errorText);
+        }
+      }
+
       setConversionProgress(prev => ({ ...prev, [fileId]: 50 }));
 
       const summaryResponse = await fetch(`/api/boards/${boardId}/files/${fileId}/summarize`, {
@@ -212,7 +237,11 @@ export default function FileList({ boardId }: FileListProps) {
         credentials: 'include',
       });
 
-      if (!summaryResponse.ok) throw new Error(await summaryResponse.text());
+      if (!summaryResponse.ok) {
+        const errorText = await summaryResponse.text();
+        throw new Error(errorText);
+      }
+
       setConversionProgress(prev => ({ ...prev, [fileId]: 100 }));
 
       const result = await summaryResponse.json();

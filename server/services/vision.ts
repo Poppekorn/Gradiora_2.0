@@ -42,11 +42,11 @@ export async function extractTextFromImage(imagePath: string): Promise<{
     };
   } catch (error) {
     console.error("OpenAI Vision API error:", error);
-    throw new Error(`Failed to extract text from image: ${error.message}`);
+    throw new Error(`Failed to extract text from image: ${(error as Error).message}`);
   }
 }
 
-export async function analyzeImageContent(imagePath: string): Promise<{
+export async function analyzeImageContent(imagePath: string, educationLevel: string = 'high_school'): Promise<{
   summary: string;
   explanation: string;
 }> {
@@ -62,7 +62,7 @@ export async function analyzeImageContent(imagePath: string): Promise<{
           content: [
             {
               type: "text",
-              text: "Analyze this image and provide: 1) A concise summary of the main content 2) A detailed explanation of the concepts shown. Return in JSON format with 'summary' and 'explanation' fields."
+              text: `Analyze this image at ${educationLevel} level and provide: 1) A concise summary of the main content 2) A detailed explanation of the concepts shown. Return in JSON format with 'summary' and 'explanation' fields.`
             },
             {
               type: "image_url",
@@ -83,6 +83,6 @@ export async function analyzeImageContent(imagePath: string): Promise<{
     };
   } catch (error) {
     console.error("OpenAI Vision API error:", error);
-    throw new Error(`Failed to analyze image content: ${error.message}`);
+    throw new Error(`Failed to analyze image content: ${(error as Error).message}`);
   }
 }
