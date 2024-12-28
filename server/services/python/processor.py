@@ -12,9 +12,12 @@ from PIL import Image
 import pytesseract
 import io
 
-def debug_log(message: str) -> None:
-    """Print debug messages to stderr"""
-    print(f"Debug: {message}", file=sys.stderr)
+def debug_log(message: str, data: Dict = None) -> None:
+    """Print debug messages to stderr with optional data"""
+    log_entry = {"message": message}
+    if data:
+        log_entry["data"] = data
+    print(f"Debug: {json.dumps(log_entry)}", file=sys.stderr)
 
 class DocumentProcessor:
     """Handles document processing with robust error handling and logging"""
@@ -23,13 +26,21 @@ class DocumentProcessor:
     def process_image(file_path: str) -> Dict[str, Any]:
         """Process image files and extract text with confidence scores"""
         try:
-            debug_log(f"Processing image file: {file_path}")
+            debug_log("Processing image file", {"path": file_path})
 
             # Open and verify the image
             with Image.open(file_path) as img:
+                # Log image details
+                debug_log("Image opened successfully", {
+                    "size": f"{img.size[0]}x{img.size[1]}",
+                    "mode": img.mode,
+                    "format": img.format
+                })
+
                 # Convert image to RGB if necessary
                 if img.mode not in ('L', 'RGB'):
                     img = img.convert('RGB')
+                    debug_log("Image converted to RGB")
 
                 # Extract text using OCR with confidence data
                 try:
@@ -43,9 +54,19 @@ class DocumentProcessor:
 
                     # Get complete text
                     text = pytesseract.image_to_string(img)
-                    debug_log(f"Successfully extracted text from image. Length: {len(text)}, Avg Confidence: {avg_confidence}")
+
+                    debug_log("OCR extraction completed", {
+                        "text_length": len(text),
+                        "avg_confidence": avg_confidence,
+                        "total_words": len(ocr_data['text']),
+                        "confidence_values": len(confidences)
+                    })
+
                 except Exception as e:
-                    debug_log(f"OCR extraction failed: {str(e)}")
+                    debug_log(f"OCR extraction failed: {str(e)}", {
+                        "error_type": type(e).__name__,
+                        "traceback": traceback.format_exc()
+                    })
                     text = ""
                     avg_confidence = 0
 
@@ -57,7 +78,7 @@ class DocumentProcessor:
                 img_buffer = io.BytesIO()
                 img.save(img_buffer, format=format_name)
 
-                return {
+                result = {
                     "type": "image",
                     "content": {
                         "format": format_name,
@@ -68,9 +89,20 @@ class DocumentProcessor:
                     }
                 }
 
+                debug_log("Image processing completed", {
+                    "result_type": result["type"],
+                    "has_text": bool(result["content"]["extracted_text"]),
+                    "confidence": result["content"]["ocr_confidence"]
+                })
+
+                return result
+
         except Exception as e:
-            debug_log(f"Image processing failed: {str(e)}")
-            debug_log(traceback.format_exc())
+            error_details = {
+                "error_type": type(e).__name__,
+                "traceback": traceback.format_exc()
+            }
+            debug_log(f"Image processing failed: {str(e)}", error_details)
             return {"error": f"Image processing failed: {str(e)}"}
 
     @staticmethod

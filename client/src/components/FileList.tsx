@@ -105,29 +105,54 @@ export default function FileList({ boardId }: FileListProps) {
         credentials: 'include'
       });
 
-      if (!response.ok) throw new Error(await response.text());
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Preview fetch error:", {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorText
+        });
+        throw new Error(errorText || "Failed to load preview");
+      }
 
       const contentType = response.headers.get('content-type');
       if (contentType?.startsWith('image/')) {
-        const blob = await response.blob();
-        setFilePreview(prev => ({ 
-          ...prev, 
-          [fileId]: { 
-            type: 'image',
-            url: URL.createObjectURL(blob)
-          }
-        }));
+        try {
+          const blob = await response.blob();
+          setFilePreview(prev => ({ 
+            ...prev, 
+            [fileId]: { 
+              type: 'image',
+              url: URL.createObjectURL(blob)
+            }
+          }));
+        } catch (blobError) {
+          console.error("Blob creation error:", blobError);
+          throw new Error("Failed to create image preview");
+        }
       } else {
-        const preview = await response.json();
-        setFilePreview(prev => ({ ...prev, [fileId]: preview }));
+        try {
+          const preview = await response.json();
+          if (!preview || typeof preview !== 'object') {
+            throw new Error("Invalid preview data received");
+          }
+          setFilePreview(prev => ({ ...prev, [fileId]: preview }));
+        } catch (jsonError) {
+          console.error("JSON parsing error:", jsonError);
+          throw new Error("Failed to parse preview data");
+        }
       }
       setPreviewVisible(prev => ({ ...prev, [fileId]: true }));
     } catch (error) {
-      console.error("Error fetching preview:", error);
+      console.error("Error fetching preview:", {
+        error,
+        fileId,
+        message: error instanceof Error ? error.message : String(error)
+      });
       toast({
         variant: "destructive",
-        title: "Error",
-        description: "Failed to load file preview",
+        title: "Preview Error",
+        description: error instanceof Error ? error.message : "Failed to load file preview",
       });
     } finally {
       setPreviewLoading(prev => ({ ...prev, [fileId]: false }));
@@ -264,6 +289,64 @@ export default function FileList({ boardId }: FileListProps) {
     if (confidence >= 70) return "Medium Confidence";
     return "Low Confidence";
   };
+
+  // Update the confidence meter rendering
+  const renderConfidenceMeter = (confidence: number) => {
+    if (typeof confidence !== 'number' || isNaN(confidence)) {
+      return null;
+    }
+
+    return (
+      <div className="space-y-2">
+        <div className="flex justify-between items-center">
+          <span className="text-sm font-medium">
+            OCR Confidence: {confidence.toFixed(1)}%
+          </span>
+          <span className="text-sm text-muted-foreground">
+            {getConfidenceLabel(confidence)}
+          </span>
+        </div>
+        <Progress 
+          value={confidence} 
+          className={`h-2 ${getConfidenceColor(confidence)}`}
+        />
+        {confidence < 50 && (
+          <p className="text-sm text-yellow-600 mt-1">
+            Low confidence may indicate poor image quality or complex text layout
+          </p>
+        )}
+      </div>
+    );
+  };
+
+  // Update the preview rendering for images
+  const renderImagePreview = (preview: any, file: FileWithTags) => {
+    return (
+      <div className="space-y-4">
+        <Image
+          src={preview.url}
+          alt={file.originalName}
+          className="max-h-48 mx-auto object-contain"
+        />
+        {preview.content?.extracted_text && (
+          <div className="mt-4 space-y-4">
+            {preview.content.ocr_confidence !== undefined && 
+              renderConfidenceMeter(preview.content.ocr_confidence)
+            }
+            <div>
+              <h4 className="font-semibold mb-2">Extracted Text</h4>
+              <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+                {preview.content.extracted_text || 
+                  <span className="text-yellow-600">No text could be extracted from this image</span>
+                }
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
 
   if (isLoading) {
     return <div>Loading files...</div>;
@@ -447,39 +530,7 @@ export default function FileList({ boardId }: FileListProps) {
                   {preview && isPreviewVisible && (
                     <div className="border rounded-lg p-4">
                       {preview.type === 'image' ? (
-                        <div className="space-y-4">
-                          <Image
-                            src={preview.url}
-                            alt={file.originalName}
-                            className="max-h-48 mx-auto object-contain"
-                          />
-                          {preview.content?.extracted_text && (
-                            <div className="mt-4 space-y-4">
-                              {preview.content.ocr_confidence !== undefined && (
-                                <div className="space-y-2">
-                                  <div className="flex justify-between items-center">
-                                    <span className="text-sm font-medium">
-                                      OCR Confidence: {preview.content.ocr_confidence}%
-                                    </span>
-                                    <span className="text-sm text-muted-foreground">
-                                      {getConfidenceLabel(preview.content.ocr_confidence)}
-                                    </span>
-                                  </div>
-                                  <Progress 
-                                    value={preview.content.ocr_confidence} 
-                                    className={`h-2 ${getConfidenceColor(preview.content.ocr_confidence)}`}
-                                  />
-                                </div>
-                              )}
-                              <div>
-                                <h4 className="font-semibold mb-2">Extracted Text</h4>
-                                <p className="text-sm text-muted-foreground whitespace-pre-wrap">
-                                  {preview.content.extracted_text}
-                                </p>
-                              </div>
-                            </div>
-                          )}
-                        </div>
+                        renderImagePreview(preview, file)
                       ) : preview.type === 'text' || preview.type === 'document' ? (
                         <div className="max-h-48 overflow-auto">
                           <pre className="whitespace-pre-wrap text-sm">
