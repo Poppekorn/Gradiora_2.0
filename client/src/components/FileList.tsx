@@ -2,17 +2,10 @@ import { useState } from "react";
 import { useFiles } from "@/hooks/use-files";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { File as FileIcon, Tag, Trash2, X, MoreVertical, Loader2, StickyNote, ChevronDown, ChevronUp, FileText, Eye, EyeOff } from "lucide-react";
+import { File as FileIcon, Tag, Trash2, X, MoreVertical, Loader2, ChevronDown, ChevronUp, Eye, EyeOff } from "lucide-react";
 import { format } from "date-fns";
 import type { File, Tag as TagType } from "@db/schema";
 import { Progress } from "@/components/ui/progress";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -43,23 +36,15 @@ interface FileWithTags extends File {
   }[];
 }
 
-interface SummaryResult {
-  summary: string;
-  explanation: string;
-}
-
 export default function FileList({ boardId }: FileListProps) {
   const [expandedFileId, setExpandedFileId] = useState<number | null>(null);
   const [educationLevel, setEducationLevel] = useState("high_school");
   const { files, isLoading, tags, removeTagFromFile, deleteFile } = useFiles(boardId);
   const { toast } = useToast();
   const [summaryLoading, setSummaryLoading] = useState<Record<number, boolean>>({});
-  const [conversionLoading, setConversionLoading] = useState<Record<number, boolean>>({});
-  const [conversionProgress, setConversionProgress] = useState<Record<number, number>>({});
-  const [filePreview, setFilePreview] = useState<Record<number, any>>({});
   const [previewLoading, setPreviewLoading] = useState<Record<number, boolean>>({});
   const [previewVisible, setPreviewVisible] = useState<Record<number, boolean>>({});
-  const [textConverted, setTextConverted] = useState<Record<number, boolean>>({});
+  const [filePreview, setFilePreview] = useState<Record<number, any>>({});
 
   const getSummary = useMutation({
     mutationFn: async (fileId: number) => {
@@ -71,48 +56,17 @@ export default function FileList({ boardId }: FileListProps) {
     },
   });
 
-  const generateSummary = useMutation({
-    mutationFn: async (fileId: number) => {
-      try {
-        setConversionProgress(prev => ({ ...prev, [fileId]: 25 }));
-
-        // For images, we don't need separate conversion
-        const file = files.find(f => f.id === fileId);
-        if (!file) throw new Error("File not found");
-        if (!isImageFile(file.mimeType)) {
-          const response = await fetch(`/api/boards/${boardId}/files/${fileId}/convert`, {
-            method: 'POST',
-            credentials: 'include',
-          });
-
-          if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(errorText);
-          }
-        }
-
-        setConversionProgress(prev => ({ ...prev, [fileId]: 50 }));
-
-        const summaryResponse = await fetch(`/api/boards/${boardId}/files/${fileId}/summarize`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ educationLevel }),
-          credentials: 'include',
-        });
-
-        if (!summaryResponse.ok) {
-          const errorText = await summaryResponse.text();
-          throw new Error(errorText);
-        }
-
-        setConversionProgress(prev => ({ ...prev, [fileId]: 100 }));
-        return summaryResponse.json();
-      } catch (error) {
-        handleError(error as Error);
-        throw error;
-      }
-    },
-  });
+  const handleViewSummary = async (fileId: number) => {
+    try {
+      setSummaryLoading(prev => ({ ...prev, [fileId]: true }));
+      const summary = await getSummary.mutateAsync(fileId);
+      setExpandedFileId(fileId === expandedFileId ? null : fileId);
+    } catch (error) {
+      handleError(error as Error);
+    } finally {
+      setSummaryLoading(prev => ({ ...prev, [fileId]: false }));
+    }
+  };
 
   const fetchFilePreview = async (fileId: number) => {
     try {
@@ -123,48 +77,44 @@ export default function FileList({ boardId }: FileListProps) {
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error("Preview fetch error:", {
-          status: response.status,
-          statusText: response.statusText,
-          error: errorText
-        });
         throw new Error(errorText || "Failed to load preview");
       }
 
       const contentType = response.headers.get('content-type');
       if (contentType?.startsWith('image/')) {
-        try {
-          const blob = await response.blob();
-          setFilePreview(prev => ({ 
-            ...prev, 
-            [fileId]: { 
-              type: 'image',
-              url: URL.createObjectURL(blob)
+        const blob = await response.blob();
+        setFilePreview(prev => ({ 
+          ...prev, 
+          [fileId]: { 
+            type: 'image',
+            url: URL.createObjectURL(blob),
+            isProcessing: true
+          }
+        }));
+
+        // After setting image preview, fetch the extracted text
+        const textResponse = await fetch(`/api/boards/${boardId}/files/${fileId}/extract-text`, {
+          credentials: 'include'
+        });
+
+        if (textResponse.ok) {
+          const textData = await textResponse.json();
+          setFilePreview(prev => ({
+            ...prev,
+            [fileId]: {
+              ...prev[fileId],
+              extractedText: textData.text,
+              isProcessing: false
             }
           }));
-        } catch (blobError) {
-          console.error("Blob creation error:", blobError);
-          throw new Error("Failed to create image preview");
         }
       } else {
-        try {
-          const preview = await response.json();
-          if (!preview || typeof preview !== 'object') {
-            throw new Error("Invalid preview data received");
-          }
-          setFilePreview(prev => ({ ...prev, [fileId]: preview }));
-        } catch (jsonError) {
-          console.error("JSON parsing error:", jsonError);
-          throw new Error("Failed to parse preview data");
-        }
+        const preview = await response.json();
+        setFilePreview(prev => ({ ...prev, [fileId]: preview }));
       }
       setPreviewVisible(prev => ({ ...prev, [fileId]: true }));
     } catch (error) {
-      console.error("Error fetching preview:", {
-        error,
-        fileId,
-        message: error instanceof Error ? error.message : String(error)
-      });
+      console.error("Error fetching preview:", error);
       toast({
         variant: "destructive",
         title: "Preview Error",
@@ -185,62 +135,6 @@ export default function FileList({ boardId }: FileListProps) {
     });
   };
 
-  const handleViewSummary = async (fileId: number) => {
-    try {
-      setSummaryLoading(prev => ({ ...prev, [fileId]: true }));
-      const summary = await getSummary.mutateAsync(fileId);
-      setExpandedFileId(fileId === expandedFileId ? null : fileId);
-    } catch (error) {
-      if ((error as Error).message.includes('not found')) {
-        try {
-          setConversionProgress(prev => ({ ...prev, [fileId]: 0 }));
-          await handleQuickConversion(fileId);
-          await generateSummary.mutateAsync(fileId);
-          setExpandedFileId(fileId);
-        } catch (genError) {
-          handleError(genError as Error);
-        }
-      } else {
-        handleError(error as Error);
-      }
-    } finally {
-      setSummaryLoading(prev => ({ ...prev, [fileId]: false }));
-    }
-  };
-
-  const handleQuickConversion = async (fileId: number) => {
-    try {
-      setConversionLoading(prev => ({ ...prev, [fileId]: true }));
-      setConversionProgress(prev => ({ ...prev, [fileId]: 0 }));
-
-      const file = files?.find(f => f.id === fileId);
-      if (!file) throw new Error("File not found");
-
-      const response = await fetch(`/api/boards/${boardId}/files/${fileId}/convert`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(errorText);
-      }
-
-      setConversionProgress(prev => ({ ...prev, [fileId]: 100 }));
-      setTextConverted(prev => ({ ...prev, [fileId]: true }));
-
-      toast({
-        title: "Success",
-        description: "File converted successfully!",
-      });
-    } catch (error) {
-      handleError(error as Error);
-      throw error;
-    } finally {
-      setConversionLoading(prev => ({ ...prev, [fileId]: false }));
-    }
-  };
-
   const handleDeleteFile = async (fileId: number) => {
     try {
       await deleteFile(fileId);
@@ -254,10 +148,6 @@ export default function FileList({ boardId }: FileListProps) {
         return rest;
       });
       setFilePreview(prev => {
-        const { [fileId]: _, ...rest } = prev;
-        return rest;
-      });
-      setTextConverted(prev => {
         const { [fileId]: _, ...rest } = prev;
         return rest;
       });
@@ -291,46 +181,6 @@ export default function FileList({ boardId }: FileListProps) {
     return mimeType.startsWith('image/');
   };
 
-  const getConfidenceColor = (confidence: number): string => {
-    if (confidence >= 90) return "bg-green-500";
-    if (confidence >= 70) return "bg-yellow-500";
-    return "bg-red-500";
-  };
-
-  const getConfidenceLabel = (confidence: number): string => {
-    if (confidence >= 90) return "High Confidence";
-    if (confidence >= 70) return "Medium Confidence";
-    return "Low Confidence";
-  };
-
-  const renderConfidenceMeter = (confidence: number) => {
-    if (typeof confidence !== 'number' || isNaN(confidence)) {
-      return null;
-    }
-
-    return (
-      <div className="space-y-2">
-        <div className="flex justify-between items-center">
-          <span className="text-sm font-medium">
-            OCR Confidence: {confidence.toFixed(1)}%
-          </span>
-          <span className="text-sm text-muted-foreground">
-            {getConfidenceLabel(confidence)}
-          </span>
-        </div>
-        <Progress 
-          value={confidence} 
-          className={`h-2 ${getConfidenceColor(confidence)}`}
-        />
-        {confidence < 50 && (
-          <p className="text-sm text-yellow-600 mt-1">
-            Low confidence may indicate poor image quality or complex text layout
-          </p>
-        )}
-      </div>
-    );
-  };
-
   const renderImagePreview = (preview: any, file: FileWithTags) => {
     return (
       <div className="space-y-4">
@@ -339,10 +189,24 @@ export default function FileList({ boardId }: FileListProps) {
           alt={file.originalName}
           className="max-h-48 mx-auto object-contain"
         />
+        {preview.isProcessing ? (
+          <div className="flex items-center justify-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span className="text-sm text-muted-foreground">Extracting text...</span>
+          </div>
+        ) : preview.extractedText ? (
+          <div className="mt-4">
+            <h4 className="font-semibold mb-2">Extracted Text</h4>
+            <ScrollArea className="h-48 rounded-md border p-4">
+              <pre className="text-sm whitespace-pre-wrap">
+                {preview.extractedText}
+              </pre>
+            </ScrollArea>
+          </div>
+        ) : null}
       </div>
     );
   };
-
 
   if (isLoading) {
     return <div>Loading files...</div>;
@@ -382,17 +246,14 @@ export default function FileList({ boardId }: FileListProps) {
         {files?.map((file: FileWithTags) => {
           const isExpanded = expandedFileId === file.id;
           const isLoading = summaryLoading[file.id];
-          const isConverting = conversionLoading[file.id];
           const isImage = isImageFile(file.mimeType);
-          const hasTextConverted = textConverted[file.id];
-          const progress = conversionProgress[file.id] || 0;
           const preview = filePreview[file.id];
           const isPreviewLoading = previewLoading[file.id];
           const isPreviewVisible = previewVisible[file.id];
 
           return (
             <Card key={file.id} className="hover:shadow-lg transition-shadow">
-              <CardHeader className="cursor-pointer">
+              <CardHeader>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 flex-1 min-w-0">
                     <FileIcon className="h-5 w-5 flex-shrink-0" />
@@ -404,7 +265,6 @@ export default function FileList({ boardId }: FileListProps) {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    {/* Preview toggle button */}
                     <Button
                       variant="ghost"
                       size="icon"
@@ -421,45 +281,21 @@ export default function FileList({ boardId }: FileListProps) {
                       )}
                     </Button>
 
-                    {/* Convert to Text button (only for images) */}
-                    {isImage && !hasTextConverted && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleQuickConversion(file.id);
-                        }}
-                        disabled={isConverting}
-                        className="flex items-center gap-1"
-                      >
-                        {isConverting ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <FileText className="h-4 w-4" />
-                        )}
-                        <span>{isConverting ? "Converting..." : "Convert to Text"}</span>
-                      </Button>
-                    )}
-
-                    {/* Summarize button (only after text conversion for images, or immediately for other files) */}
-                    {(!isImage || hasTextConverted) && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="ml-2"
-                        onClick={() => handleViewSummary(file.id)}
-                        disabled={isLoading}
-                      >
-                        {isLoading ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : isExpanded ? (
-                          <ChevronUp className="h-4 w-4" />
-                        ) : (
-                          <ChevronDown className="h-4 w-4" />
-                        )}
-                      </Button>
-                    )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="ml-2"
+                      onClick={() => handleViewSummary(file.id)}
+                      disabled={isLoading}
+                    >
+                      {isLoading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : isExpanded ? (
+                        <ChevronUp className="h-4 w-4" />
+                      ) : (
+                        <ChevronDown className="h-4 w-4" />
+                      )}
+                    </Button>
 
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -479,22 +315,10 @@ export default function FileList({ boardId }: FileListProps) {
                     </DropdownMenu>
                   </div>
                 </div>
-
-                {/* Conversion progress */}
-                {isConverting && (
-                  <div className="mt-4">
-                    <Progress value={progress} className="w-full" />
-                    <p className="text-sm text-muted-foreground mt-2 text-center">
-                      Converting...
-                    </p>
-                  </div>
-                )}
               </CardHeader>
 
-              {/* File content area */}
               <CardContent>
                 <div className="space-y-4">
-                  {/* Tags section */}
                   <div className="flex items-start gap-2">
                     <Tag className="h-4 w-4 mt-1" />
                     <div className="flex flex-wrap gap-2">
@@ -522,7 +346,6 @@ export default function FileList({ boardId }: FileListProps) {
                     </div>
                   </div>
 
-                  {/* Preview section */}
                   {!preview && !isPreviewLoading && !isPreviewVisible && (
                     <Button 
                       variant="ghost" 
@@ -551,7 +374,6 @@ export default function FileList({ boardId }: FileListProps) {
                     </div>
                   )}
 
-                  {/* Summary section */}
                   {isExpanded && (
                     <div className="mt-4 space-y-4 bg-muted p-4 rounded-lg">
                       {getSummary.data && getSummary.data.fileId === file.id ? (
