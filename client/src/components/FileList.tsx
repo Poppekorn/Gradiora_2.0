@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useFiles } from "@/hooks/use-files";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { File as FileIcon, Tag, Trash2, X, MoreVertical, Loader2, StickyNote, ChevronDown, ChevronUp, FileText } from "lucide-react";
+import { File as FileIcon, Tag, Trash2, X, MoreVertical, Loader2, StickyNote, ChevronDown, ChevronUp, FileText, Eye, EyeOff } from "lucide-react";
 import { format } from "date-fns";
 import type { File, Tag as TagType } from "@db/schema";
 import { Progress } from "@/components/ui/progress";
@@ -58,6 +58,7 @@ export default function FileList({ boardId }: FileListProps) {
   const [conversionProgress, setConversionProgress] = useState<Record<number, number>>({});
   const [filePreview, setFilePreview] = useState<Record<number, any>>({});
   const [previewLoading, setPreviewLoading] = useState<Record<number, boolean>>({});
+  const [previewVisible, setPreviewVisible] = useState<Record<number, boolean>>({});
 
   const getSummary = useMutation({
     mutationFn: async (fileId: number) => {
@@ -124,6 +125,8 @@ export default function FileList({ boardId }: FileListProps) {
         const preview = await response.json();
         setFilePreview(prev => ({ ...prev, [fileId]: preview }));
       }
+      // Set preview to visible when loaded
+      setPreviewVisible(prev => ({ ...prev, [fileId]: true }));
     } catch (error) {
       console.error("Error fetching preview:", error);
       toast({
@@ -134,6 +137,17 @@ export default function FileList({ boardId }: FileListProps) {
     } finally {
       setPreviewLoading(prev => ({ ...prev, [fileId]: false }));
     }
+  };
+
+  const togglePreview = (fileId: number) => {
+    setPreviewVisible(prev => {
+      const currentValue = prev[fileId];
+      if (!currentValue && !filePreview[fileId]) {
+        // Load preview if not already loaded
+        fetchFilePreview(fileId);
+      }
+      return { ...prev, [fileId]: !currentValue };
+    });
   };
 
   const handleViewSummary = async (fileId: number) => {
@@ -212,6 +226,15 @@ export default function FileList({ boardId }: FileListProps) {
         description: "File deleted successfully",
       });
       setExpandedFileId(null);
+      // Clear preview state when file is deleted
+      setPreviewVisible(prev => {
+        const { [fileId]: _, ...rest } = prev;
+        return rest;
+      });
+      setFilePreview(prev => {
+        const { [fileId]: _, ...rest } = prev;
+        return rest;
+      });
     } catch (error) {
       console.error("Error deleting file:", error);
       toast({
@@ -285,6 +308,7 @@ export default function FileList({ boardId }: FileListProps) {
           const progress = conversionProgress[file.id] || 0;
           const preview = filePreview[file.id];
           const isPreviewLoading = previewLoading[file.id];
+          const isPreviewVisible = previewVisible[file.id];
 
           return (
             <Card key={file.id} className="hover:shadow-lg transition-shadow">
@@ -300,6 +324,21 @@ export default function FileList({ boardId }: FileListProps) {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => togglePreview(file.id)}
+                      className="relative"
+                      disabled={isPreviewLoading}
+                    >
+                      {isPreviewLoading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : isPreviewVisible ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </Button>
                     {isImage && (
                       <Button
                         variant="outline"
@@ -391,7 +430,7 @@ export default function FileList({ boardId }: FileListProps) {
                     </div>
                   </div>
 
-                  {!preview && !isPreviewLoading && (
+                  {!preview && !isPreviewLoading && !isPreviewVisible && (
                     <Button 
                       variant="ghost" 
                       onClick={() => fetchFilePreview(file.id)}
@@ -405,7 +444,7 @@ export default function FileList({ boardId }: FileListProps) {
                     <Skeleton className="w-full h-48" />
                   )}
 
-                  {preview && (
+                  {preview && isPreviewVisible && (
                     <div className="border rounded-lg p-4">
                       {preview.type === 'image' ? (
                         <Image
