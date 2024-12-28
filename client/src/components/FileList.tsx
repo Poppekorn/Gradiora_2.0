@@ -447,11 +447,21 @@ export default function FileList({ boardId }: FileListProps) {
                   {preview && isPreviewVisible && (
                     <div className="border rounded-lg p-4">
                       {preview.type === 'image' ? (
-                        <Image
-                          src={preview.url}
-                          alt={file.originalName}
-                          className="max-h-48 mx-auto object-contain"
-                        />
+                        <div className="space-y-4">
+                          <Image
+                            src={preview.url}
+                            alt={file.originalName}
+                            className="max-h-48 mx-auto object-contain"
+                          />
+                          {preview.content?.extracted_text && (
+                            <div className="mt-4">
+                              <h4 className="font-semibold mb-2">Extracted Text</h4>
+                              <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+                                {preview.content.extracted_text}
+                              </p>
+                            </div>
+                          )}
+                        </div>
                       ) : preview.type === 'text' || preview.type === 'document' ? (
                         <div className="max-h-48 overflow-auto">
                           <pre className="whitespace-pre-wrap text-sm">

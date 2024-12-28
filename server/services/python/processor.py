@@ -8,6 +8,9 @@ import mammoth
 import traceback
 import subprocess
 from typing import Dict, Any, Optional, Union
+from PIL import Image
+import pytesseract
+import io
 
 def debug_log(message: str) -> None:
     """Print debug messages to stderr"""
@@ -15,6 +18,49 @@ def debug_log(message: str) -> None:
 
 class DocumentProcessor:
     """Handles document processing with robust error handling and logging"""
+
+    @staticmethod
+    def process_image(file_path: str) -> Dict[str, Any]:
+        """Process image files and extract text if possible"""
+        try:
+            debug_log(f"Processing image file: {file_path}")
+
+            # Open and verify the image
+            with Image.open(file_path) as img:
+                # Convert image to RGB if necessary
+                if img.mode not in ('L', 'RGB'):
+                    img = img.convert('RGB')
+
+                # Extract text using OCR
+                try:
+                    text = pytesseract.image_to_string(img)
+                    debug_log(f"Successfully extracted text from image. Length: {len(text)}")
+                except Exception as e:
+                    debug_log(f"OCR extraction failed: {str(e)}")
+                    text = ""
+
+                # Get image info
+                width, height = img.size
+                format_name = img.format or 'unknown'
+
+                # Convert image to base64 for preview
+                img_buffer = io.BytesIO()
+                img.save(img_buffer, format=format_name)
+
+                return {
+                    "type": "image",
+                    "content": {
+                        "format": format_name,
+                        "width": width,
+                        "height": height,
+                        "extracted_text": text.strip() if text else None
+                    }
+                }
+
+        except Exception as e:
+            debug_log(f"Image processing failed: {str(e)}")
+            debug_log(traceback.format_exc())
+            return {"error": f"Image processing failed: {str(e)}"}
 
     @staticmethod
     def process_doc_antiword(file_path: str) -> Optional[str]:
@@ -189,6 +235,8 @@ def process_document(file_path: str) -> Dict[str, Any]:
             result = processor.process_pdf(file_path)
         elif ext in ['.txt', '.md']:
             result = processor.process_text(file_path)
+        elif ext in ['.jpg', '.jpeg', '.png', '.webp']:
+            result = processor.process_image(file_path)
         else:
             result = {"error": f"Unsupported file format: {ext}"}
 

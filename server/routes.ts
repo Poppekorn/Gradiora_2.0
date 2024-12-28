@@ -41,7 +41,10 @@ const upload = multer({
       'text/markdown': ['.md'],
       'application/pdf': ['.pdf'],
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
-      'application/msword': ['.doc']
+      'application/msword': ['.doc'],
+      'image/jpeg': ['.jpg', '.jpeg'],
+      'image/png': ['.png'],
+      'image/webp': ['.webp']
     };
 
     const ext = path.extname(file.originalname).toLowerCase();
