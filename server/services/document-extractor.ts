@@ -1,9 +1,52 @@
+import { spawn } from 'child_process';
 import { PDFDocument } from "pdf-lib";
 import mammoth from "mammoth";
 import fs from "fs";
 import path from "path";
 import Logger from "../utils/logger";
 import { sanitizeContent, validateContentSafety } from "./sanitization";
+
+function runPythonExtractor(filePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const pythonProcess = spawn('python3', [
+      path.join(__dirname, 'python', 'document_processor.py'),
+      filePath
+    ]);
+
+    let output = '';
+    let errorOutput = '';
+
+    pythonProcess.stdout.on('data', (data) => {
+      output += data.toString();
+    });
+
+    pythonProcess.stderr.on('data', (data) => {
+      errorOutput += data.toString();
+    });
+
+    pythonProcess.on('close', (code) => {
+      if (code !== 0) {
+        Logger.error("[TextExtraction] Python process error", {
+          code,
+          error: errorOutput
+        });
+        reject(new Error(`Python process failed: ${errorOutput}`));
+        return;
+      }
+
+      try {
+        const result = JSON.parse(output);
+        if (result.error) {
+          reject(new Error(result.error));
+          return;
+        }
+        resolve(result.text);
+      } catch (error) {
+        reject(new Error('Failed to parse Python output'));
+      }
+    });
+  });
+}
 
 export async function extractTextFromDocument(filePath: string): Promise<string> {
   try {
@@ -13,153 +56,33 @@ export async function extractTextFromDocument(filePath: string): Promise<string>
       throw new Error("File not found");
     }
 
-    const extension = path.extname(filePath).toLowerCase();
-    let text = '';
+    // Extract text using Python implementation
+    const extractedText = await runPythonExtractor(filePath);
 
-    switch (extension) {
-      case '.docx':
-      case '.doc':
-        try {
-          Logger.info("[TextExtraction] Processing Word document", { extension });
-          // Read the file as a buffer for binary files
-          const buffer = await fs.promises.readFile(filePath);
-
-          // Use mammoth for text extraction
-          const result = await mammoth.extractRawText({ buffer });
-          text = result.value;
-
-          // Validate extracted text
-          if (!text || text.trim().length === 0) {
-            throw new Error("No text content extracted");
-          }
-
-          // Initial safety check
-          if (!validateContentSafety(text)) {
-            throw new Error("Content failed safety validation");
-          }
-
-          Logger.info("[TextExtraction] Word document processed", { 
-            textLength: text.length,
-            messages: result.messages 
-          });
-        } catch (docError) {
-          Logger.error("[TextExtraction] Error with primary extraction method", { docError });
-
-          // Try alternative mammoth options for older doc files
-          try {
-            const buffer = await fs.promises.readFile(filePath);
-            const result = await mammoth.extractRawText({
-              buffer,
-              options: {
-                preserveEmptyParagraphs: true,
-                includeDefaultStyleMap: true
-              }
-            });
-            text = result.value;
-
-            if (!text || text.trim().length === 0) {
-              throw new Error("No text content extracted with fallback method");
-            }
-
-            if (!validateContentSafety(text)) {
-              throw new Error("Fallback content failed safety validation");
-            }
-
-            Logger.info("[TextExtraction] Fallback extraction successful", {
-              textLength: text.length
-            });
-          } catch (fallbackError) {
-            Logger.error("[TextExtraction] Fallback extraction failed", { fallbackError });
-            throw new Error("Failed to extract text from document file");
-          }
-        }
-        break;
-
-      case '.pdf':
-        try {
-          Logger.info("[TextExtraction] Processing PDF document");
-          const pdfBytes = await fs.promises.readFile(filePath);
-          const pdfDoc = await PDFDocument.load(pdfBytes);
-          const pages = pdfDoc.getPages();
-          let pdfText = '';
-
-          for (let i = 0; i < pages.length; i++) {
-            const page = pages[i];
-            const content = await page.getTextContent();
-            const pageText = content.items
-              .filter(item => typeof item.str === 'string' && item.str.trim().length > 0)
-              .map(item => item.str.trim())
-              .join(' ');
-
-            if (pageText.length > 0 && validateContentSafety(pageText)) {
-              pdfText += pageText + '\n\n';
-            }
-
-            Logger.info("[TextExtraction] PDF page processed", { 
-              pageNumber: i + 1,
-              pageTextLength: pageText.length 
-            });
-          }
-
-          text = pdfText.trim();
-          if (!text) {
-            throw new Error("No text content extracted from PDF");
-          }
-        } catch (error) {
-          Logger.error("[TextExtraction] Error processing PDF", { error });
-          throw new Error("Failed to extract text from PDF");
-        }
-        break;
-
-      case '.txt':
-      case '.md':
-        try {
-          Logger.info("[TextExtraction] Processing text file");
-          text = await fs.promises.readFile(filePath, 'utf8');
-
-          // Validate text content
-          if (!text || text.trim().length === 0) {
-            throw new Error("Empty text file");
-          }
-
-          if (!validateContentSafety(text)) {
-            throw new Error("Text content failed safety validation");
-          }
-
-          Logger.info("[TextExtraction] Text file processed", { 
-            textLength: text.length 
-          });
-        } catch (error) {
-          Logger.error("[TextExtraction] Error reading text file", { error });
-          throw new Error("Failed to read text file");
-        }
-        break;
-
-      default:
-        throw new Error(`Unsupported file type: ${extension}`);
-    }
-
-    // Final validation and sanitization
-    if (!text || text.trim().length < 10) {
+    if (!extractedText || extractedText.trim().length < 10) {
       Logger.warn("[TextExtraction] Extracted text is too short or empty", { 
-        textLength: text ? text.length : 0 
+        textLength: extractedText ? extractedText.length : 0 
       });
       throw new Error("No valid text content extracted from document");
     }
 
+    // Validate content safety
+    if (!validateContentSafety(extractedText)) {
+      throw new Error("Content failed safety validation");
+    }
+
     // Sanitize the extracted text
-    text = sanitizeContent(text, {
+    const sanitizedText = sanitizeContent(extractedText, {
       normalizeWhitespace: true,
       removeControlChars: true,
       maxLength: 1000000 // 1MB text limit
     });
 
     Logger.info("[TextExtraction] Document processing completed", {
-      fileType: extension,
-      textLength: text.length
+      textLength: sanitizedText.length
     });
 
-    return text;
+    return sanitizedText;
   } catch (error) {
     Logger.error("[TextExtraction] Fatal error in text extraction", { 
       error: error instanceof Error ? error.message : String(error),
