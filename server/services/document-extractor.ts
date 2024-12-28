@@ -49,7 +49,7 @@ async function processImageWithVision(filePath: string): Promise<ProcessedDocume
       }
     };
   } catch (error) {
-    Logger.error("[ImageProcessor] Vision API processing failed", {
+    Logger.error("[ImageProcessor] Vision API processing failed", { 
       error: error instanceof Error ? error.message : String(error),
       filePath
     });
@@ -180,21 +180,23 @@ export async function extractTextFromDocument(filePath: string): Promise<string>
       throw new Error("No valid text content extracted from document");
     }
 
-    // Validate content safety
-    if (!validateContentSafety(extractedText)) {
+    // Validate content safety, passing isImage flag for image content
+    if (!validateContentSafety(extractedText, isImage)) {
       throw new Error("Content failed safety validation");
     }
 
-    // Sanitize the extracted text
+    // Sanitize the extracted text with appropriate options for image content
     const sanitizedText = sanitizeContent(extractedText, {
       normalizeWhitespace: true,
       removeControlChars: true,
-      maxLength: 1000000 // 1MB text limit
+      maxLength: 1000000, // 1MB text limit
+      isImageContent: isImage
     });
 
     Logger.info("[TextExtraction] Document processing completed", {
       textLength: sanitizedText.length,
-      documentType: processedDoc.type
+      documentType: processedDoc.type,
+      isImage
     });
 
     return sanitizedText;

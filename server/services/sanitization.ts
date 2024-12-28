@@ -6,6 +6,7 @@ interface SanitizationOptions {
   maxLength?: number;
   normalizeWhitespace?: boolean;
   removeControlChars?: boolean;
+  isImageContent?: boolean;
 }
 
 export function sanitizeContent(
@@ -51,11 +52,6 @@ export function sanitizeContent(
       sanitized = sanitized.slice(0, options.maxLength);
     }
 
-    // Validate the sanitized content
-    if (!/^[\x20-\x7E\s\n]*$/g.test(sanitized)) {
-      Logger.warn("[Sanitization] Content contains non-printable characters after sanitization");
-    }
-
     Logger.info("[Sanitization] Content sanitized successfully", {
       originalLength: content.length,
       sanitizedLength: sanitized.length
@@ -63,17 +59,18 @@ export function sanitizeContent(
 
     return sanitized;
   } catch (error) {
-    Logger.error("[Sanitization] Error sanitizing content:", {
+    Logger.error("[Sanitization] Error sanitizing content", {
       error: error instanceof Error ? error.message : String(error)
     });
     throw new Error("Failed to sanitize content");
   }
 }
 
-export function validateContentSafety(content: string): boolean {
+export function validateContentSafety(content: string, isImageContent: boolean = false): boolean {
   try {
     Logger.info("[Sanitization] Validating content safety", {
-      contentLength: content.length
+      contentLength: content.length,
+      isImageContent
     });
 
     // Check for potential XSS patterns
@@ -95,7 +92,7 @@ export function validateContentSafety(content: string): boolean {
     }
 
     // Check for extremely long lines (potential DoS)
-    const maxLineLength = 10000;
+    const maxLineLength = isImageContent ? 100000 : 10000; // Higher limit for image content
     const lines = content.split('\n');
     if (lines.some(line => line.length > maxLineLength)) {
       Logger.warn("[Sanitization] Found extremely long line", {
@@ -104,30 +101,35 @@ export function validateContentSafety(content: string): boolean {
       return false;
     }
 
-    // Check character distribution (potential binary/encrypted content)
-    const charCounts = new Map<string, number>();
-    for (const char of content) {
-      charCounts.set(char, (charCounts.get(char) || 0) + 1);
-    }
-    
-    const uniqueChars = charCounts.size;
-    const contentLength = content.length;
-    const charDistributionRatio = uniqueChars / contentLength;
+    // For image content, we skip character distribution check
+    if (!isImageContent) {
+      // Check character distribution (potential binary/encrypted content)
+      const charCounts = new Map<string, number>();
+      for (const char of content) {
+        charCounts.set(char, (charCounts.get(char) || 0) + 1);
+      }
 
-    // Unusual character distribution might indicate non-text content
-    if (charDistributionRatio < 0.01 || charDistributionRatio > 0.95) {
-      Logger.warn("[Sanitization] Suspicious character distribution", {
-        uniqueChars,
-        contentLength,
-        ratio: charDistributionRatio
-      });
-      return false;
+      const uniqueChars = charCounts.size;
+      const contentLength = content.length;
+      const charDistributionRatio = uniqueChars / contentLength;
+
+      // More lenient thresholds for general content
+      if (charDistributionRatio < 0.005 || charDistributionRatio > 0.95) {
+        Logger.warn("[Sanitization] Suspicious character distribution", {
+          uniqueChars,
+          contentLength,
+          ratio: charDistributionRatio
+        });
+        return false;
+      }
     }
 
-    Logger.info("[Sanitization] Content passed safety validation");
+    Logger.info("[Sanitization] Content passed safety validation", {
+      isImageContent
+    });
     return true;
   } catch (error) {
-    Logger.error("[Sanitization] Error validating content safety:", {
+    Logger.error("[Sanitization] Error validating content safety", {
       error: error instanceof Error ? error.message : String(error)
     });
     return false;
