@@ -1,17 +1,36 @@
 import { spawn } from 'child_process';
-import { PDFDocument } from "pdf-lib";
-import mammoth from "mammoth";
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
 import Logger from "../utils/logger";
 import { sanitizeContent, validateContentSafety } from "./sanitization";
 
-function runPythonExtractor(filePath: string): Promise<string> {
+// Get the directory name in ESM
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+function runPythonProcessor(filePath: string, options: { summarize?: boolean; educationLevel?: string } = {}): Promise<string> {
   return new Promise((resolve, reject) => {
-    const pythonProcess = spawn('python3', [
-      path.join(__dirname, 'python', 'document_processor.py'),
+    const args = [
+      path.join(__dirname, 'python', 'processor.py'),
       filePath
-    ]);
+    ];
+
+    if (options.summarize) {
+      args.push('--summarize');
+      if (options.educationLevel) {
+        args.push(options.educationLevel);
+      }
+    }
+
+    Logger.info("[PythonProcessor] Starting Python process", {
+      script: args[0],
+      filePath,
+      options
+    });
+
+    const pythonProcess = spawn('python3', args);
 
     let output = '';
     let errorOutput = '';
@@ -22,26 +41,38 @@ function runPythonExtractor(filePath: string): Promise<string> {
 
     pythonProcess.stderr.on('data', (data) => {
       errorOutput += data.toString();
+      Logger.error("[PythonProcessor] Error from Python process", {
+        error: data.toString()
+      });
     });
 
     pythonProcess.on('close', (code) => {
       if (code !== 0) {
-        Logger.error("[TextExtraction] Python process error", {
+        Logger.error("[PythonProcessor] Process failed", {
           code,
           error: errorOutput
         });
-        reject(new Error(`Python process failed: ${errorOutput}`));
+        reject(new Error(`Python process failed with code ${code}: ${errorOutput}`));
         return;
       }
 
       try {
         const result = JSON.parse(output);
         if (result.error) {
+          Logger.error("[PythonProcessor] Processing error", {
+            error: result.error
+          });
           reject(new Error(result.error));
           return;
         }
+
+        Logger.info("[PythonProcessor] Processing completed successfully");
         resolve(result.text);
       } catch (error) {
+        Logger.error("[PythonProcessor] Failed to parse Python output", {
+          error: error instanceof Error ? error.message : String(error),
+          output
+        });
         reject(new Error('Failed to parse Python output'));
       }
     });
@@ -57,7 +88,7 @@ export async function extractTextFromDocument(filePath: string): Promise<string>
     }
 
     // Extract text using Python implementation
-    const extractedText = await runPythonExtractor(filePath);
+    const extractedText = await runPythonProcessor(filePath);
 
     if (!extractedText || extractedText.trim().length < 10) {
       Logger.warn("[TextExtraction] Extracted text is too short or empty", { 
