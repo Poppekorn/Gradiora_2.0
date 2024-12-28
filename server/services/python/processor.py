@@ -1,96 +1,63 @@
 #!/usr/bin/env python3
 import os
 import json
+import sys
 from docx import Document
 import PyPDF2
 import mammoth
-import base64
-from typing import Dict, Union, Optional, List, Any
 import traceback
 
-def process_doc_file(file_path: str) -> Dict[str, Any]:
+def process_doc_file(file_path: str) -> dict:
     """Process DOC file with enhanced error handling and logging."""
     try:
-        print(f"Starting DOC file processing: {file_path}")
+        print(f"Debug: Starting DOC file processing: {file_path}", file=sys.stderr)
 
         if not os.path.exists(file_path):
-            print(f"File not found: {file_path}")
+            print(f"Debug: File not found: {file_path}", file=sys.stderr)
             return {"error": "File not found"}
 
         with open(file_path, 'rb') as doc_file:
-            # First try mammoth's markdown conversion
-            try:
-                print("Attempting markdown conversion...")
-                result = mammoth.convert_to_markdown(doc_file)
-                text = result.value
+            # Try different conversion methods in sequence
+            methods = [
+                ('markdown', lambda f: mammoth.convert_to_markdown(f)),
+                ('raw_text', lambda f: mammoth.extract_raw_text(f)),
+                ('html', lambda f: mammoth.convert_to_html(f))
+            ]
 
-                # Log any conversion messages
-                for message in result.messages:
-                    print(f"Mammoth conversion message: {message}")
+            for method_name, converter in methods:
+                try:
+                    print(f"Debug: Attempting {method_name} conversion...", file=sys.stderr)
+                    doc_file.seek(0)
+                    result = converter(doc_file)
+                    text = result.value.strip()
 
-                if text.strip():
-                    print(f"Successfully extracted text with markdown conversion. Length: {len(text)}")
-                    return {
-                        "type": "doc",
-                        "content": {
-                            "text": text,
-                            "messages": [str(msg) for msg in result.messages]
+                    if text:
+                        print(f"Debug: Successfully extracted text using {method_name}. Length: {len(text)}", file=sys.stderr)
+                        return {
+                            "type": "doc",
+                            "content": {
+                                "text": text,
+                                "messages": [f"Extracted using {method_name} method"]
+                            }
                         }
-                    }
-            except Exception as markdown_error:
-                print(f"Markdown conversion failed: {str(markdown_error)}")
-                print("Falling back to raw text extraction...")
+                    else:
+                        print(f"Debug: {method_name} conversion produced empty result", file=sys.stderr)
+                except Exception as e:
+                    print(f"Debug: {method_name} conversion failed: {str(e)}", file=sys.stderr)
+                    continue
 
-            # If markdown fails, try raw text extraction
-            doc_file.seek(0)
-            try:
-                result = mammoth.extract_raw_text(doc_file)
-                text = result.value
-
-                if text.strip():
-                    print(f"Successfully extracted raw text. Length: {len(text)}")
-                    return {
-                        "type": "doc",
-                        "content": {
-                            "text": text,
-                            "messages": ["Extracted using raw text method"]
-                        }
-                    }
-                else:
-                    print("Raw text extraction produced empty result")
-            except Exception as raw_error:
-                print(f"Raw text extraction failed: {str(raw_error)}")
-
-            # If both methods fail, try alternative options
-            doc_file.seek(0)
-            try:
-                # Try with different transform options
-                result = mammoth.convert_to_html(doc_file, transform_document=mammoth.transforms.paragraph(lambda p: p))
-                text = result.value
-
-                if text.strip():
-                    print(f"Successfully extracted text with HTML conversion. Length: {len(text)}")
-                    return {
-                        "type": "doc",
-                        "content": {
-                            "text": text,
-                            "messages": ["Extracted using HTML conversion method"]
-                        }
-                    }
-            except Exception as html_error:
-                print(f"HTML conversion failed: {str(html_error)}")
-
-        # If all extraction methods fail
+        # If all methods fail
         error_msg = "Failed to extract text using any available method"
-        print(error_msg)
+        print(f"Debug: {error_msg}", file=sys.stderr)
         return {"error": error_msg}
 
     except Exception as e:
-        error_msg = f"DOC processing failed: {str(e)}\n{traceback.format_exc()}"
-        print(f"Error: {error_msg}")
+        error_msg = f"DOC processing failed: {str(e)}"
+        print(f"Debug: Error: {error_msg}", file=sys.stderr)
+        print(f"Debug: Traceback: {traceback.format_exc()}", file=sys.stderr)
         return {"error": error_msg}
 
-def process_document(file_path: str) -> Dict[str, Any]:
+def process_document(file_path: str) -> dict:
     """Process document and extract text with structure."""
     try:
         if not os.path.exists(file_path):
@@ -99,43 +66,64 @@ def process_document(file_path: str) -> Dict[str, Any]:
         _, file_extension = os.path.splitext(file_path)
         ext = file_extension.lower()
 
-        print(f"Processing file: {file_path} with extension: {ext}")
+        print(f"Debug: Processing file: {file_path} with extension: {ext}", file=sys.stderr)
 
+        result = None
         if ext == '.doc':
-            return process_doc_file(file_path)
+            result = process_doc_file(file_path)
         elif ext == '.docx':
-            doc = Document(file_path)
-            return {
-                "type": "docx",
-                "content": {"text": "\n".join(paragraph.text for paragraph in doc.paragraphs)}
-            }
-        elif ext == '.pdf':
-            with open(file_path, 'rb') as file:
-                reader = PyPDF2.PdfReader(file)
-                content = {
-                    "metadata": reader.metadata,
-                    "pages": []
-                }
-                for page in reader.pages:
-                    content["pages"].append(page.extract_text())
-                return {
-                    "type": "pdf",
-                    "content": content
-                }
-        elif ext in ['.txt', '.md']:
-            with open(file_path, 'r', encoding='utf-8') as file:
-                return {
-                    "type": "text",
+            try:
+                doc = Document(file_path)
+                result = {
+                    "type": "docx",
                     "content": {
-                        "text": file.read()
+                        "text": "\n".join(paragraph.text for paragraph in doc.paragraphs)
                     }
                 }
+            except Exception as e:
+                print(f"Debug: DOCX processing failed: {str(e)}", file=sys.stderr)
+                result = {"error": f"DOCX processing failed: {str(e)}"}
+        elif ext == '.pdf':
+            try:
+                with open(file_path, 'rb') as file:
+                    reader = PyPDF2.PdfReader(file)
+                    pages = [page.extract_text() for page in reader.pages]
+                    result = {
+                        "type": "pdf",
+                        "content": {
+                            "pages": pages
+                        }
+                    }
+            except Exception as e:
+                print(f"Debug: PDF processing failed: {str(e)}", file=sys.stderr)
+                result = {"error": f"PDF processing failed: {str(e)}"}
+        elif ext in ['.txt', '.md']:
+            try:
+                with open(file_path, 'r', encoding='utf-8') as file:
+                    result = {
+                        "type": "text",
+                        "content": {
+                            "text": file.read()
+                        }
+                    }
+            except Exception as e:
+                print(f"Debug: Text file processing failed: {str(e)}", file=sys.stderr)
+                result = {"error": f"Text file processing failed: {str(e)}"}
         else:
-            return {"error": f"Unsupported file format: {ext}"}
+            result = {"error": f"Unsupported file format: {ext}"}
+
+        # Ensure the result is JSON serializable and output is properly formatted
+        json_result = json.dumps(result)
+        print("Debug: Final JSON result:", json_result, file=sys.stderr)
+        print(json_result)  # This is the only line that goes to stdout
+        return result
 
     except Exception as e:
-        error_msg = f"Processing failed: {str(e)}\n{traceback.format_exc()}"
-        print(f"Error: {error_msg}")
+        error_msg = f"Processing failed: {str(e)}"
+        print(f"Debug: Fatal error: {error_msg}", file=sys.stderr)
+        print(f"Debug: Traceback: {traceback.format_exc()}", file=sys.stderr)
+        json_error = json.dumps({"error": error_msg})
+        print(json_error)
         return {"error": error_msg}
 
 def extract_text_from_docx(docx_path: str) -> str:
@@ -246,10 +234,9 @@ def summarize_text(text: str, education_level: str = "high_school") -> Dict[str,
         }
 
 if __name__ == "__main__":
-    import sys
     if len(sys.argv) > 1:
         file_path = sys.argv[1]
-        result = process_document(file_path)
-        print(json.dumps(result))
+        process_document(file_path)
     else:
-        print(json.dumps({"error": "No file path provided"}))
+        error = json.dumps({"error": "No file path provided"})
+        print(error)

@@ -74,17 +74,24 @@ function runPythonProcessor(filePath: string): Promise<ProcessedDocument> {
     let errorOutput = '';
 
     pythonProcess.stdout.on('data', (data) => {
-      output += data.toString();
+      const chunk = data.toString();
+      Logger.info("[DocumentProcessor] Python stdout:", { output: chunk });
+      output += chunk;
     });
 
     pythonProcess.stderr.on('data', (data) => {
-      errorOutput += data.toString();
-      Logger.error("[DocumentProcessor] Error from Python process", {
-        error: data.toString()
-      });
+      const chunk = data.toString();
+      Logger.error("[DocumentProcessor] Python stderr:", { error: chunk });
+      errorOutput += chunk;
     });
 
     pythonProcess.on('close', (code) => {
+      Logger.info("[DocumentProcessor] Python process completed", { 
+        code,
+        output: output.trim(),
+        error: errorOutput.trim()
+      });
+
       if (code !== 0) {
         Logger.error("[DocumentProcessor] Process failed", {
           code,
@@ -95,7 +102,11 @@ function runPythonProcessor(filePath: string): Promise<ProcessedDocument> {
       }
 
       try {
-        const result = JSON.parse(output);
+        // Try to parse only the last line as JSON (in case there's debug output before)
+        const lines = output.trim().split('\n');
+        const lastLine = lines[lines.length - 1];
+        const result = JSON.parse(lastLine);
+
         if (result.error) {
           Logger.error("[DocumentProcessor] Processing error", {
             error: result.error
@@ -111,10 +122,21 @@ function runPythonProcessor(filePath: string): Promise<ProcessedDocument> {
       } catch (error) {
         Logger.error("[DocumentProcessor] Failed to parse Python output", {
           error: error instanceof Error ? error.message : String(error),
-          output
+          rawOutput: output,
+          lastLine: output.trim().split('\n').pop()
         });
         reject(new Error('Failed to parse Python output'));
       }
+    });
+
+    // Handle process errors
+    pythonProcess.on('error', (error) => {
+      Logger.error("[DocumentProcessor] Process error", {
+        error: error.message,
+        command: 'python3',
+        args: [pythonScript, filePath]
+      });
+      reject(new Error(`Failed to start Python process: ${error.message}`));
     });
   });
 }
@@ -132,44 +154,13 @@ export async function extractTextFromDocument(filePath: string): Promise<string>
     let extractedText = '';
 
     // Extract text based on document type
-    if (processedDoc.type === 'docx') {
-      const content = processedDoc.content as DocumentContent;
-
-      // Add metadata as a header
-      if (content.metadata.title) {
-        extractedText += `Title: ${content.metadata.title}\n`;
-      }
-      if (content.metadata.author) {
-        extractedText += `Author: ${content.metadata.author}\n`;
-      }
-      extractedText += '\n';
-
-      // Process sections
-      for (const section of content.sections) {
-        if (section.heading) {
-          extractedText += `${'#'.repeat(section.level)} ${section.heading}\n\n`;
-        }
-        for (const para of section.content) {
-          extractedText += `${para.text}\n\n`;
-        }
-      }
-
-      // Add tables
-      if (content.tables.length > 0) {
-        extractedText += '\nTables:\n';
-        content.tables.forEach((table, index) => {
-          extractedText += `Table ${index + 1}:\n`;
-          table.data.forEach(row => {
-            extractedText += row.join(' | ') + '\n';
-          });
-          extractedText += '\n';
-        });
-      }
-    } else if (processedDoc.type === 'doc' || processedDoc.type === 'text') {
+    if (processedDoc.type === 'docx' || processedDoc.type === 'doc') {
       extractedText = (processedDoc.content as { text: string }).text;
     } else if (processedDoc.type === 'pdf') {
       const content = processedDoc.content as { pages: string[] };
       extractedText = content.pages.join('\n\n');
+    } else if (processedDoc.type === 'text') {
+      extractedText = (processedDoc.content as { text: string }).text;
     }
 
     if (!extractedText || extractedText.trim().length < 10) {
