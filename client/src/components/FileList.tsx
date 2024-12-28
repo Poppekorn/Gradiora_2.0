@@ -59,6 +59,7 @@ export default function FileList({ boardId }: FileListProps) {
   const [filePreview, setFilePreview] = useState<Record<number, any>>({});
   const [previewLoading, setPreviewLoading] = useState<Record<number, boolean>>({});
   const [previewVisible, setPreviewVisible] = useState<Record<number, boolean>>({});
+  const [textConverted, setTextConverted] = useState<Record<number, boolean>>({});
 
   const getSummary = useMutation({
     mutationFn: async (fileId: number) => {
@@ -212,47 +213,26 @@ export default function FileList({ boardId }: FileListProps) {
       setConversionLoading(prev => ({ ...prev, [fileId]: true }));
       setConversionProgress(prev => ({ ...prev, [fileId]: 0 }));
 
-      const file = files.find(f => f.id === fileId);
+      const file = files?.find(f => f.id === fileId);
       if (!file) throw new Error("File not found");
 
-      // For images, skip the conversion step
-      if (!isImageFile(file.mimeType)) {
-        const response = await fetch(`/api/boards/${boardId}/files/${fileId}/convert`, {
-          method: 'POST',
-          credentials: 'include',
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText);
-        }
-      }
-
-      setConversionProgress(prev => ({ ...prev, [fileId]: 50 }));
-
-      const summaryResponse = await fetch(`/api/boards/${boardId}/files/${fileId}/summarize`, {
+      const response = await fetch(`/api/boards/${boardId}/files/${fileId}/convert`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ educationLevel }),
         credentials: 'include',
       });
 
-      if (!summaryResponse.ok) {
-        const errorText = await summaryResponse.text();
+      if (!response.ok) {
+        const errorText = await response.text();
         throw new Error(errorText);
       }
 
       setConversionProgress(prev => ({ ...prev, [fileId]: 100 }));
-
-      const result = await summaryResponse.json();
-      setExpandedFileId(fileId);
+      setTextConverted(prev => ({ ...prev, [fileId]: true }));
 
       toast({
         title: "Success",
-        description: "File processed successfully!",
+        description: "File converted successfully!",
       });
-
-      return result;
     } catch (error) {
       handleError(error as Error);
       throw error;
@@ -274,6 +254,10 @@ export default function FileList({ boardId }: FileListProps) {
         return rest;
       });
       setFilePreview(prev => {
+        const { [fileId]: _, ...rest } = prev;
+        return rest;
+      });
+      setTextConverted(prev => {
         const { [fileId]: _, ...rest } = prev;
         return rest;
       });
@@ -319,7 +303,6 @@ export default function FileList({ boardId }: FileListProps) {
     return "Low Confidence";
   };
 
-  // Update the confidence meter rendering
   const renderConfidenceMeter = (confidence: number) => {
     if (typeof confidence !== 'number' || isNaN(confidence)) {
       return null;
@@ -348,7 +331,6 @@ export default function FileList({ boardId }: FileListProps) {
     );
   };
 
-  // Update the preview rendering for images
   const renderImagePreview = (preview: any, file: FileWithTags) => {
     return (
       <div className="space-y-4">
@@ -357,21 +339,6 @@ export default function FileList({ boardId }: FileListProps) {
           alt={file.originalName}
           className="max-h-48 mx-auto object-contain"
         />
-        {preview.content?.extracted_text && (
-          <div className="mt-4 space-y-4">
-            {preview.content.ocr_confidence !== undefined && 
-              renderConfidenceMeter(preview.content.ocr_confidence)
-            }
-            <div>
-              <h4 className="font-semibold mb-2">Extracted Text</h4>
-              <p className="text-sm text-muted-foreground whitespace-pre-wrap">
-                {preview.content.extracted_text || 
-                  <span className="text-yellow-600">No text could be extracted from this image</span>
-                }
-              </p>
-            </div>
-          </div>
-        )}
       </div>
     );
   };
@@ -412,11 +379,12 @@ export default function FileList({ boardId }: FileListProps) {
       </div>
 
       <div className="grid grid-cols-1 gap-4">
-        {files.map((file: FileWithTags) => {
+        {files?.map((file: FileWithTags) => {
           const isExpanded = expandedFileId === file.id;
           const isLoading = summaryLoading[file.id];
           const isConverting = conversionLoading[file.id];
           const isImage = isImageFile(file.mimeType);
+          const hasTextConverted = textConverted[file.id];
           const progress = conversionProgress[file.id] || 0;
           const preview = filePreview[file.id];
           const isPreviewLoading = previewLoading[file.id];
@@ -431,11 +399,12 @@ export default function FileList({ boardId }: FileListProps) {
                     <div className="flex-1 min-w-0">
                       <h3 className="font-semibold truncate">{file.originalName}</h3>
                       <p className="text-sm text-muted-foreground">
-                        {format(new Date(file.createdAt), "PPp")}
+                        {format(new Date(file.createdAt || ''), "PPp")}
                       </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
+                    {/* Preview toggle button */}
                     <Button
                       variant="ghost"
                       size="icon"
@@ -451,7 +420,9 @@ export default function FileList({ boardId }: FileListProps) {
                         <Eye className="h-4 w-4" />
                       )}
                     </Button>
-                    {isImage && (
+
+                    {/* Convert to Text button (only for images) */}
+                    {isImage && !hasTextConverted && (
                       <Button
                         variant="outline"
                         size="sm"
@@ -470,22 +441,26 @@ export default function FileList({ boardId }: FileListProps) {
                         <span>{isConverting ? "Converting..." : "Convert to Text"}</span>
                       </Button>
                     )}
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="ml-2"
-                      onClick={() => handleViewSummary(file.id)}
-                    >
-                      {isLoading ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        isExpanded ? (
+
+                    {/* Summarize button (only after text conversion for images, or immediately for other files) */}
+                    {(!isImage || hasTextConverted) && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="ml-2"
+                        onClick={() => handleViewSummary(file.id)}
+                        disabled={isLoading}
+                      >
+                        {isLoading ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : isExpanded ? (
                           <ChevronUp className="h-4 w-4" />
                         ) : (
                           <ChevronDown className="h-4 w-4" />
-                        )
-                      )}
-                    </Button>
+                        )}
+                      </Button>
+                    )}
+
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon">
@@ -493,7 +468,10 @@ export default function FileList({ boardId }: FileListProps) {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => handleDeleteFile(file.id)} className="text-red-500">
+                        <DropdownMenuItem 
+                          onClick={() => handleDeleteFile(file.id)} 
+                          className="text-red-500"
+                        >
                           <Trash2 className="mr-2 h-4 w-4" />
                           Delete
                         </DropdownMenuItem>
@@ -501,20 +479,22 @@ export default function FileList({ boardId }: FileListProps) {
                     </DropdownMenu>
                   </div>
                 </div>
+
+                {/* Conversion progress */}
                 {isConverting && (
                   <div className="mt-4">
                     <Progress value={progress} className="w-full" />
                     <p className="text-sm text-muted-foreground mt-2 text-center">
-                      {progress === 25 && "Converting image to text..."}
-                      {progress === 50 && "Text extracted, generating summary..."}
-                      {progress === 75 && "Finalizing summary..."}
-                      {progress === 100 && "Complete!"}
+                      Converting...
                     </p>
                   </div>
                 )}
               </CardHeader>
+
+              {/* File content area */}
               <CardContent>
                 <div className="space-y-4">
+                  {/* Tags section */}
                   <div className="flex items-start gap-2">
                     <Tag className="h-4 w-4 mt-1" />
                     <div className="flex flex-wrap gap-2">
@@ -542,6 +522,7 @@ export default function FileList({ boardId }: FileListProps) {
                     </div>
                   </div>
 
+                  {/* Preview section */}
                   {!preview && !isPreviewLoading && !isPreviewVisible && (
                     <Button 
                       variant="ghost" 
@@ -560,23 +541,17 @@ export default function FileList({ boardId }: FileListProps) {
                     <div className="border rounded-lg p-4">
                       {preview.type === 'image' ? (
                         renderImagePreview(preview, file)
-                      ) : preview.type === 'text' || preview.type === 'document' ? (
+                      ) : (
                         <div className="max-h-48 overflow-auto">
                           <pre className="whitespace-pre-wrap text-sm">
-                            {preview.preview}
+                            {preview.content?.text || preview.preview}
                           </pre>
-                        </div>
-                      ) : preview.type === 'pdf' && (
-                        <div className="text-center">
-                          <p>PDF Document</p>
-                          <p className="text-sm text-muted-foreground">
-                            {preview.pageCount} pages
-                          </p>
                         </div>
                       )}
                     </div>
                   )}
 
+                  {/* Summary section */}
                   {isExpanded && (
                     <div className="mt-4 space-y-4 bg-muted p-4 rounded-lg">
                       {getSummary.data && getSummary.data.fileId === file.id ? (
