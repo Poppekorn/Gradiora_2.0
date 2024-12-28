@@ -21,7 +21,7 @@ class DocumentProcessor:
 
     @staticmethod
     def process_image(file_path: str) -> Dict[str, Any]:
-        """Process image files and extract text if possible"""
+        """Process image files and extract text with confidence scores"""
         try:
             debug_log(f"Processing image file: {file_path}")
 
@@ -31,13 +31,23 @@ class DocumentProcessor:
                 if img.mode not in ('L', 'RGB'):
                     img = img.convert('RGB')
 
-                # Extract text using OCR
+                # Extract text using OCR with confidence data
                 try:
+                    # Get detailed OCR data including confidence scores
+                    ocr_data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
+
+                    # Calculate average confidence for non-empty text
+                    confidences = [conf for conf, text in zip(ocr_data['conf'], ocr_data['text']) 
+                                 if str(text).strip() and conf != -1]
+                    avg_confidence = sum(confidences) / len(confidences) if confidences else 0
+
+                    # Get complete text
                     text = pytesseract.image_to_string(img)
-                    debug_log(f"Successfully extracted text from image. Length: {len(text)}")
+                    debug_log(f"Successfully extracted text from image. Length: {len(text)}, Avg Confidence: {avg_confidence}")
                 except Exception as e:
                     debug_log(f"OCR extraction failed: {str(e)}")
                     text = ""
+                    avg_confidence = 0
 
                 # Get image info
                 width, height = img.size
@@ -53,7 +63,8 @@ class DocumentProcessor:
                         "format": format_name,
                         "width": width,
                         "height": height,
-                        "extracted_text": text.strip() if text else None
+                        "extracted_text": text.strip() if text else None,
+                        "ocr_confidence": round(avg_confidence, 2)
                     }
                 }
 

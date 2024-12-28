@@ -74,7 +74,6 @@ export default function FileList({ boardId }: FileListProps) {
     mutationFn: async (fileId: number) => {
       setConversionProgress(prev => ({ ...prev, [fileId]: 25 }));
 
-      // First step: OCR conversion
       const response = await fetch(`/api/boards/${boardId}/files/${fileId}/convert`, {
         method: 'POST',
         credentials: 'include',
@@ -83,7 +82,6 @@ export default function FileList({ boardId }: FileListProps) {
       if (!response.ok) throw new Error(await response.text());
       setConversionProgress(prev => ({ ...prev, [fileId]: 50 }));
 
-      // Second step: Generate summary
       const summaryResponse = await fetch(`/api/boards/${boardId}/files/${fileId}/summarize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -111,7 +109,6 @@ export default function FileList({ boardId }: FileListProps) {
 
       const contentType = response.headers.get('content-type');
       if (contentType?.startsWith('image/')) {
-        // For images, create a blob URL
         const blob = await response.blob();
         setFilePreview(prev => ({ 
           ...prev, 
@@ -121,11 +118,9 @@ export default function FileList({ boardId }: FileListProps) {
           }
         }));
       } else {
-        // For other file types, get the JSON preview
         const preview = await response.json();
         setFilePreview(prev => ({ ...prev, [fileId]: preview }));
       }
-      // Set preview to visible when loaded
       setPreviewVisible(prev => ({ ...prev, [fileId]: true }));
     } catch (error) {
       console.error("Error fetching preview:", error);
@@ -143,7 +138,6 @@ export default function FileList({ boardId }: FileListProps) {
     setPreviewVisible(prev => {
       const currentValue = prev[fileId];
       if (!currentValue && !filePreview[fileId]) {
-        // Load preview if not already loaded
         fetchFilePreview(fileId);
       }
       return { ...prev, [fileId]: !currentValue };
@@ -158,11 +152,8 @@ export default function FileList({ boardId }: FileListProps) {
     } catch (error) {
       if ((error as Error).message.includes('not found')) {
         try {
-          // First convert the file
           setConversionProgress(prev => ({ ...prev, [fileId]: 0 }));
           await handleQuickConversion(fileId);
-
-          // Then generate summary
           await generateSummary.mutateAsync(fileId);
           setExpandedFileId(fileId);
         } catch (genError) {
@@ -181,7 +172,6 @@ export default function FileList({ boardId }: FileListProps) {
       setConversionLoading(prev => ({ ...prev, [fileId]: true }));
       setConversionProgress(prev => ({ ...prev, [fileId]: 0 }));
 
-      // First step: Convert file to text
       const response = await fetch(`/api/boards/${boardId}/files/${fileId}/convert`, {
         method: 'POST',
         credentials: 'include',
@@ -190,7 +180,6 @@ export default function FileList({ boardId }: FileListProps) {
       if (!response.ok) throw new Error(await response.text());
       setConversionProgress(prev => ({ ...prev, [fileId]: 50 }));
 
-      // Second step: Generate summary
       const summaryResponse = await fetch(`/api/boards/${boardId}/files/${fileId}/summarize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -226,7 +215,6 @@ export default function FileList({ boardId }: FileListProps) {
         description: "File deleted successfully",
       });
       setExpandedFileId(null);
-      // Clear preview state when file is deleted
       setPreviewVisible(prev => {
         const { [fileId]: _, ...rest } = prev;
         return rest;
@@ -263,6 +251,18 @@ export default function FileList({ boardId }: FileListProps) {
 
   const isImageFile = (mimeType: string) => {
     return mimeType.startsWith('image/');
+  };
+
+  const getConfidenceColor = (confidence: number): string => {
+    if (confidence >= 90) return "bg-green-500";
+    if (confidence >= 70) return "bg-yellow-500";
+    return "bg-red-500";
+  };
+
+  const getConfidenceLabel = (confidence: number): string => {
+    if (confidence >= 90) return "High Confidence";
+    if (confidence >= 70) return "Medium Confidence";
+    return "Low Confidence";
   };
 
   if (isLoading) {
@@ -454,11 +454,29 @@ export default function FileList({ boardId }: FileListProps) {
                             className="max-h-48 mx-auto object-contain"
                           />
                           {preview.content?.extracted_text && (
-                            <div className="mt-4">
-                              <h4 className="font-semibold mb-2">Extracted Text</h4>
-                              <p className="text-sm text-muted-foreground whitespace-pre-wrap">
-                                {preview.content.extracted_text}
-                              </p>
+                            <div className="mt-4 space-y-4">
+                              {preview.content.ocr_confidence !== undefined && (
+                                <div className="space-y-2">
+                                  <div className="flex justify-between items-center">
+                                    <span className="text-sm font-medium">
+                                      OCR Confidence: {preview.content.ocr_confidence}%
+                                    </span>
+                                    <span className="text-sm text-muted-foreground">
+                                      {getConfidenceLabel(preview.content.ocr_confidence)}
+                                    </span>
+                                  </div>
+                                  <Progress 
+                                    value={preview.content.ocr_confidence} 
+                                    className={`h-2 ${getConfidenceColor(preview.content.ocr_confidence)}`}
+                                  />
+                                </div>
+                              )}
+                              <div>
+                                <h4 className="font-semibold mb-2">Extracted Text</h4>
+                                <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+                                  {preview.content.extracted_text}
+                                </p>
+                              </div>
                             </div>
                           )}
                         </div>
