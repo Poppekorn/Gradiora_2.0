@@ -8,29 +8,67 @@ import { sanitizeContent, validateContentSafety } from "./sanitization";
 
 // Get the directory name in ESM
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const currentDir = dirname(__filename);
+const rootDir = dirname(dirname(currentDir));
 
-function runPythonProcessor(filePath: string, options: { summarize?: boolean; educationLevel?: string } = {}): Promise<string> {
+interface DocumentMetadata {
+  author?: string;
+  created?: string;
+  modified?: string;
+  title?: string;
+  subject?: string;
+  keywords?: string;
+  category?: string;
+  comments?: string;
+}
+
+interface StyleInfo {
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+}
+
+interface ParagraphContent {
+  type: 'paragraph';
+  text: string;
+  style: StyleInfo;
+}
+
+interface DocumentSection {
+  heading: string;
+  content: ParagraphContent[];
+  level: number;
+}
+
+interface TableData {
+  data: string[][];
+  row_count: number;
+  col_count: number;
+}
+
+interface DocumentContent {
+  metadata: DocumentMetadata;
+  sections: DocumentSection[];
+  tables: TableData[];
+  headers: string[][];
+  footers: string[][];
+}
+
+interface ProcessedDocument {
+  type: 'docx' | 'doc' | 'pdf' | 'text';
+  content: DocumentContent | { text: string; messages?: string[] };
+}
+
+function runPythonProcessor(filePath: string): Promise<ProcessedDocument> {
   return new Promise((resolve, reject) => {
-    const args = [
-      path.join(__dirname, 'python', 'processor.py'),
+    const pythonScript = path.join(rootDir, 'server', 'services', 'python', 'processor.py');
+
+    Logger.info("[DocumentProcessor] Starting Python process", {
+      script: pythonScript,
       filePath
-    ];
-
-    if (options.summarize) {
-      args.push('--summarize');
-      if (options.educationLevel) {
-        args.push(options.educationLevel);
-      }
-    }
-
-    Logger.info("[PythonProcessor] Starting Python process", {
-      script: args[0],
-      filePath,
-      options
     });
 
-    const pythonProcess = spawn('python3', args);
+    const pythonProcess = spawn('python3', [pythonScript, filePath]);
 
     let output = '';
     let errorOutput = '';
@@ -41,14 +79,14 @@ function runPythonProcessor(filePath: string, options: { summarize?: boolean; ed
 
     pythonProcess.stderr.on('data', (data) => {
       errorOutput += data.toString();
-      Logger.error("[PythonProcessor] Error from Python process", {
+      Logger.error("[DocumentProcessor] Error from Python process", {
         error: data.toString()
       });
     });
 
     pythonProcess.on('close', (code) => {
       if (code !== 0) {
-        Logger.error("[PythonProcessor] Process failed", {
+        Logger.error("[DocumentProcessor] Process failed", {
           code,
           error: errorOutput
         });
@@ -59,17 +97,19 @@ function runPythonProcessor(filePath: string, options: { summarize?: boolean; ed
       try {
         const result = JSON.parse(output);
         if (result.error) {
-          Logger.error("[PythonProcessor] Processing error", {
+          Logger.error("[DocumentProcessor] Processing error", {
             error: result.error
           });
           reject(new Error(result.error));
           return;
         }
 
-        Logger.info("[PythonProcessor] Processing completed successfully");
-        resolve(result.text);
+        Logger.info("[DocumentProcessor] Processing completed successfully", {
+          documentType: result.type
+        });
+        resolve(result as ProcessedDocument);
       } catch (error) {
-        Logger.error("[PythonProcessor] Failed to parse Python output", {
+        Logger.error("[DocumentProcessor] Failed to parse Python output", {
           error: error instanceof Error ? error.message : String(error),
           output
         });
@@ -87,8 +127,50 @@ export async function extractTextFromDocument(filePath: string): Promise<string>
       throw new Error("File not found");
     }
 
-    // Extract text using Python implementation
-    const extractedText = await runPythonProcessor(filePath);
+    // Process document using Python implementation
+    const processedDoc = await runPythonProcessor(filePath);
+    let extractedText = '';
+
+    // Extract text based on document type
+    if (processedDoc.type === 'docx') {
+      const content = processedDoc.content as DocumentContent;
+
+      // Add metadata as a header
+      if (content.metadata.title) {
+        extractedText += `Title: ${content.metadata.title}\n`;
+      }
+      if (content.metadata.author) {
+        extractedText += `Author: ${content.metadata.author}\n`;
+      }
+      extractedText += '\n';
+
+      // Process sections
+      for (const section of content.sections) {
+        if (section.heading) {
+          extractedText += `${'#'.repeat(section.level)} ${section.heading}\n\n`;
+        }
+        for (const para of section.content) {
+          extractedText += `${para.text}\n\n`;
+        }
+      }
+
+      // Add tables
+      if (content.tables.length > 0) {
+        extractedText += '\nTables:\n';
+        content.tables.forEach((table, index) => {
+          extractedText += `Table ${index + 1}:\n`;
+          table.data.forEach(row => {
+            extractedText += row.join(' | ') + '\n';
+          });
+          extractedText += '\n';
+        });
+      }
+    } else if (processedDoc.type === 'doc' || processedDoc.type === 'text') {
+      extractedText = (processedDoc.content as { text: string }).text;
+    } else if (processedDoc.type === 'pdf') {
+      const content = processedDoc.content as { pages: string[] };
+      extractedText = content.pages.join('\n\n');
+    }
 
     if (!extractedText || extractedText.trim().length < 10) {
       Logger.warn("[TextExtraction] Extracted text is too short or empty", { 
@@ -110,7 +192,8 @@ export async function extractTextFromDocument(filePath: string): Promise<string>
     });
 
     Logger.info("[TextExtraction] Document processing completed", {
-      textLength: sanitizedText.length
+      textLength: sanitizedText.length,
+      documentType: processedDoc.type
     });
 
     return sanitizedText;
